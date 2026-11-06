@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>42 Chain & QL1 Faucet — free gas money</title>
+<meta name="description" content="A public faucet for 42 Chain mainnet and QL1. If your wallet is almost empty, claim a small amount of the native token for gas.">
+<link rel="stylesheet" href="style.css">
+<script>
+/* Language gate: a saved choice (faucet42_lang = "ja") goes to the
+   Japanese page; anything else — including no saved choice — defaults
+   to English. The language can be changed later with the selector in
+   each page's header. */
+(function () {
+  var lang = null;
+  try { lang = localStorage.getItem("faucet42_lang"); } catch (e) { /* storage unavailable: default English */ }
+  location.replace((lang === "ja" ? "ja.html" : "en.html") + location.search + location.hash);
+})();
+</script>
+</head>
+<body>
+<header>
+  <h1>42 Chain &amp; QL1 Faucet</h1>
+  <p class="sub">Choose your language / 言語を選んでください</p>
+  <p class="sub"><a href="en.html">English</a> ・ <a href="ja.html">日本語</a></p>
+  <noscript><p class="sub">JavaScript is disabled — please use the links above. / JavaScript が無効です。上のリンクからお進みください。</p></noscript>
+</header>
+</body>
+</html>

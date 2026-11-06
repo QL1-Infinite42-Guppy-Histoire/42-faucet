@@ -1,0 +1,37 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; background: #0f1420; color: #e8ecf3; }
+header { padding: 20px 16px 8px; max-width: 760px; margin: 0 auto; position: relative; }
+h1 { font-size: 22px; margin: 0 0 6px; padding-right: 170px; }
+/* language selector: top-right of the header (same look as the other sites) */
+.lang-switch { position: absolute; top: 20px; right: 16px; font-size: 13px; color: #aab4c4; }
+.lang-switch select { margin-left: 4px; background: #10182b; color: #e8eefc; border: 1px solid #2b3857; border-radius: 6px; padding: 2px 6px; font-size: 13px; }
+@media (max-width: 560px) { .lang-switch { top: 18px; right: 12px; } h1 { padding-right: 150px; } }
+.sub { color: #aab4c4; margin: 0 0 8px; line-height: 1.5; }
+.status { color: #8fd0ff; font-size: 13px; min-height: 18px; }
+button { background: #2470d8; color: #fff; border: 0; border-radius: 8px; padding: 10px 18px; font-size: 15px; cursor: pointer; white-space: nowrap; }
+button:disabled { opacity: .5; cursor: default; }
+.panel { background: #171e2e; border: 1px solid #26314a; border-radius: 12px; padding: 14px 16px; margin: 12px auto; max-width: 760px; width: calc(100% - 24px); }
+/* chain switcher: segmented [42 Chain | QL1] tabs, same idea as the wallet Home switch */
+.chain-switch { display: flex; background: #0f1420; border: 1px solid #33415e; border-radius: 10px; padding: 3px; margin-bottom: 14px; }
+.chain-switch .chain-btn { flex: 1; background: transparent; color: #aab4c4; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+.chain-switch .chain-btn.active { background: #2470d8; color: #fff; font-weight: 700; }
+.panel h2 { font-size: 16px; margin: 0 0 10px; }
+.info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.info-card { background: #1e2740; border-radius: 10px; padding: 12px; }
+.info-card.main { border: 1px solid #2470d8; }
+.i-label { font-size: 12px; color: #aab4c4; margin-bottom: 6px; }
+.i-value { font-size: 19px; font-weight: 700; word-break: break-all; }
+.i-note { font-size: 12px; color: #8d99ae; margin-top: 6px; line-height: 1.45; }
+.addr-label { display: block; font-size: 13px; color: #aab4c4; margin-bottom: 6px; }
+.claim-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.claim-row input { flex: 1 1 280px; padding: 10px; border-radius: 8px; border: 1px solid #33415e; background: #0f1420; color: #fff; font-size: 14px; font-family: ui-monospace, monospace; }
+.turnstile-box { margin-top: 12px; }
+.result { min-height: 20px; font-size: 14px; line-height: 1.6; margin: 12px 0 0; word-break: break-all; }
+.result.ok { color: #9be29b; }
+.result.error { color: #ffb3b3; }
+.result a { color: #8fd0ff; }
+.faucet-addr { margin-top: 14px; border-top: 1px solid #26314a; padding-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+.mono { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+.notes { color: #c3cad7; line-height: 1.7; font-size: 13px; padding-left: 18px; margin: 0; }
+a { color: #8fd0ff; }
+footer { max-width: 760px; margin: 0 auto; padding: 4px 16px 28px; color: #8d99ae; font-size: 12px; line-height: 1.6; }

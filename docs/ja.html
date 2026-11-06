@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>42 Chain・QL1 フォーセット — ガス代を無料でもらえます</title>
+<meta name="description" content="42 Chain メインネットと QL1 の公開フォーセット。ウォレットがほぼ空のときに、ガス代の小額をもらえます。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="lang-switch"><label>言語 / Language <select id="langSel"><option value="en">English</option><option value="ja" selected>日本語</option></select></label></span>
+  <h1>42 Chain・QL1 フォーセット</h1>
+  <p class="sub" id="subText">ガス代が足りないときに。ウォレットがほぼ空なら、小額を無料でもらえます。</p>
+  <p id="status" class="status">読み込み中…</p>
+</header>
+
+<section class="panel">
+  <div class="chain-switch" role="tablist" aria-label="チェーン">
+    <button type="button" id="chainBtn42" class="chain-btn" data-chain="42">42 Chain</button>
+    <button type="button" id="chainBtnQl1" class="chain-btn" data-chain="ql1">QL1</button>
+  </div>
+
+  <div class="info-grid">
+    <div class="info-card main">
+      <div class="i-label">1回でもらえる量</div>
+      <div class="i-value" id="claimAmount">—</div>
+    </div>
+    <div class="info-card">
+      <div class="i-label">フォーセットの残り</div>
+      <div class="i-value" id="faucetBalance">—</div>
+      <div class="i-note" id="claimsLeft"></div>
+    </div>
+  </div>
+
+  <label class="addr-label" for="addrInput" id="addrLabel">あなたのアドレス（0x…）</label>
+  <div class="claim-row">
+    <input id="addrInput" type="text" placeholder="0x…" autocomplete="off" spellcheck="false">
+    <button id="claimBtn" type="button" disabled>もらう</button>
+  </div>
+  <div id="turnstileBox" class="turnstile-box" hidden></div>
+  <p id="result" class="result" role="status"></p>
+
+  <div class="faucet-addr">
+    <span class="i-label">このチェーンのフォーセット用ウォレット（補充したい方はここへ送金）</span>
+    <span id="faucetAddr" class="mono">—</span>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>ルールと注意</h2>
+  <ul class="notes">
+    <li>同じアドレスは <b>7日に1回</b> まで。同じ回線（IPアドレス）からは <b>24時間に1回</b> までです（チェーンごとに別々に数えます）。</li>
+    <li>もらえるのは残高が <b><span id="gateAmount">1回分未満</span></b> のアドレスだけです。これは新規ユーザーのガス代救済用で、お金のあるウォレットへの配布ではありません。</li>
+    <li>チェーンごとに <b>1日100回</b> まで。フォーセットの残りが少なくなると、自動で配布を止めます。</li>
+    <li><b>秘密鍵や復旧フレーズは絶対に入力しないでください。</b> このサイトで必要なのは公開アドレスだけです。鍵やフレーズを求めるサイトは詐欺です。</li>
+    <li>金額は「数回分の取引ができる程度」にあえて小さくしています。複数のウォレットでの取り尽くしはご遠慮ください。</li>
+  </ul>
+</section>
+
+<footer>
+  <p>42 Chain（EVM チェーンID 421018）と QL1（EVM チェーンID 766）用フォーセット。ソース: <a href="https://github.com/QL1-Infinite42-Guppy-Histoire/42-faucet">GitHub</a>（MIT）。チェーン運営とは無関係の個人プロジェクトです。</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

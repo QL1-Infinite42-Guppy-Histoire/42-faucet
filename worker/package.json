@@ -1,0 +1,1 @@
+{"dependencies":{"ethers":"^6.13.0"},"description":"Cloudflare Worker that sends the [42] for the 42 Chain faucet site.","devDependencies":{"esbuild":"^0.24.0"},"name":"42-faucet-worker","private":true,"scripts":{"build":"esbuild worker.js --bundle --format=esm --platform=browser --target=es2022 --outfile=dist/worker.bundle.js"},"type":"module"}
