@@ -34,6 +34,8 @@
 //   - same address: 1 claim per 7 days
 //   - same IP:      1 claim per 24 hours
 //   - recipient must hold less than one claim amount of that token
+//     ([42] and QOM only — ZAP has NO balance gate: existing ZAP
+//     holders may claim too)
 //   - global cap:   100 claims per day (UTC) per (chain x token)
 //   - distribution pauses when the faucet's balance of that token
 //     drops below 5 x the claim amount
@@ -84,6 +86,7 @@ const CHAINS = {
         defaultAmount: "1",
         burnEnv: "CLAIM_BURN_ZAP",
         burnDefault: "0.5",
+        noGate: true,
       },
     },
   },
@@ -375,14 +378,17 @@ async function handleClaim(request, env) {
   const burn = claimBurnWei(env, tok);
   const perClaim = amount + burn;
 
-  let recipientBalance, faucetTokenBalance, gasPrice, gasLimit, burnGasLimit = 0n;
+  let faucetTokenBalance, gasPrice, gasLimit, burnGasLimit = 0n;
   try {
-    recipientBalance = await getTokenBalance(cfg, tok, address);
-    // Gas relief only: an address already holding at least one claim
-    // amount of this token does not need the faucet. (For ZAP claims
-    // only the ZAP balance is checked; the [42] balance is ignored.)
-    if (recipientBalance >= amount) {
-      return json({ ok: false, code: "balance_too_high", balance: fmt(recipientBalance), ...meta }, 400);
+    // Balance gate ([42] / QOM only): an address already holding at
+    // least one claim amount of the token does not need gas relief.
+    // ZAP has no gate — existing holders may claim. Only the target
+    // token's balance is ever checked.
+    if (!tok.noGate) {
+      const recipientBalance = await getTokenBalance(cfg, tok, address);
+      if (recipientBalance >= amount) {
+        return json({ ok: false, code: "balance_too_high", balance: fmt(recipientBalance), ...meta }, 400);
+      }
     }
     faucetTokenBalance = await getTokenBalance(cfg, tok, wallet.address);
     // Gas price is read at send time on each chain (the QL1 floor is

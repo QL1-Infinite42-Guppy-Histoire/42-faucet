@@ -21,6 +21,9 @@ button:disabled { opacity: .5; cursor: default; }
 .token-switch .token-btn { background: #0f1420; color: #aab4c4; border: 1px solid #33415e; border-radius: 999px; padding: 6px 18px; font-size: 13px; }
 .token-switch .token-btn.active { background: #2470d8; color: #fff; font-weight: 700; border-color: #2470d8; }
 .panel h2 { font-size: 16px; margin: 0 0 10px; }
+/* prominent stock line (faucet balance + remaining claims) */
+.stock-line { font-size: 21px; font-weight: 800; color: #fff; margin: 0 0 14px; line-height: 1.4; }
+.stock-line[hidden] { display: none; }
 .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .info-card { background: #1e2740; border-radius: 10px; padding: 12px; }
 .info-card.main { border: 1px solid #2470d8; }

@@ -26,6 +26,8 @@
     <button type="button" id="tokenBtnZap" class="token-btn" data-token="zap">ZAP</button>
   </div>
 
+  <div class="stock-line" id="stockLine" hidden></div>
+
   <div class="info-grid">
     <div class="info-card main">
       <div class="i-label">You receive</div>
@@ -63,10 +65,10 @@
   <h2>Rules &amp; notes</h2>
   <ul class="notes">
     <li>One claim per address every <b>7 days</b>, and one claim per network (IP address) every <b>24 hours</b> — counted separately for each chain and token.</li>
-    <li>Only addresses holding <b>less than <span id="gateAmount">one claim amount</span></b> can claim. This faucet is for gas relief, not a giveaway for funded wallets.</li>
+    <li id="gateNote">Only addresses holding <b>less than one claim amount</b> can claim. This faucet is for gas relief, not a giveaway for funded wallets.</li>
     <li>At most <b>100 claims a day</b> per chain and token. Distribution pauses automatically when the faucet balance runs low.</li>
     <li><b>Never enter a private key or recovery phrase anywhere.</b> This site only needs your public address — anyone asking for a key or phrase is a scam.</li>
-    <li>Amounts are small on purpose: just enough to make a few transactions. Please don't drain it with many wallets.</li>
+    <li id="smallNote">Amounts are small on purpose: just enough to make a few transactions. Please don't drain it with many wallets.</li>
   </ul>
 </section>
 

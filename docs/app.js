@@ -37,7 +37,13 @@ const S = {
     claimsEmpty: "No one has claimed yet.",
     claimsError: "Could not load the list.",
     addrLabel: (name) => `Your ${name} address (0x…)`,
-    gate: (amount, sym) => `${amount} ${sym}`,
+    subZap: (amount, burn) => `Claim ${amount} ZAP. Each claim also burns ${burn} ZAP.`,
+    gateNote: (amount, sym) =>
+      `Only addresses holding <b>less than ${amount} ${sym}</b> can claim. This faucet is for gas relief, not a giveaway for funded wallets.`,
+    gateNoteZap: "You can claim ZAP even if you already hold some.",
+    smallNote: "Amounts are small on purpose: just enough to make a few transactions. Please don't drain it with many wallets.",
+    smallNoteZap: "Amounts are small on purpose. Please don't drain it with many wallets.",
+    stock: (bal, sym, n) => `Stock: ${bal} ${sym} (about ${n} claims left)`,
     invalidAddress: "That doesn't look like a valid address. Check it and try again.",
     sending: "Sending…",
     sent: (amount, sym, url, hash) =>
@@ -68,7 +74,13 @@ const S = {
     claimsEmpty: "まだ受け取った人はいません。",
     claimsError: "一覧を読み込めませんでした。",
     addrLabel: (name) => `あなたの ${name} アドレス（0x…）`,
-    gate: (amount, sym) => `${amount} ${sym} 未満`,
+    subZap: (amount, burn) => `ZAP を ${amount} 枚受け取れます。受け取るたびに ${burn} ZAP がバーンされます。`,
+    gateNote: (amount, sym) =>
+      `もらえるのは残高が <b>${amount} ${sym} 未満</b> のアドレスだけです。これはガス代救済用で、お金のあるウォレットへの配布ではありません。`,
+    gateNoteZap: "ZAP は、すでに持っているアドレスでも受け取れます。",
+    smallNote: "金額は「数回分の取引ができる程度」にあえて小さくしています。複数のウォレットでの取り尽くしはご遠慮ください。",
+    smallNoteZap: "配布量はあえて小さくしています。複数のウォレットでの取り尽くしはご遠慮ください。",
+    stock: (bal, sym, n) => `在庫： ${bal} ${sym}（あと約 ${n} 回分）`,
     invalidAddress: "アドレスの形が違うようです。確認してもう一度どうぞ。",
     sending: "送っています…",
     sent: (amount, sym, url, hash) =>
@@ -143,12 +155,69 @@ function setResult(html, isError) {
   resultEl.className = "result" + (isError ? " error" : " ok");
 }
 
+function isZap() {
+  return currentChain === "42" && currentToken === "zap";
+}
+
 function paintChainTabs() {
   $("chainBtn42").classList.toggle("active", currentChain === "42");
   $("chainBtnQl1").classList.toggle("active", currentChain === "ql1");
-  $("subText").innerHTML = S.sub(CHAINS[currentChain].name, sym());
+  paintSub();
   $("addrLabel").textContent = S.addrLabel(CHAINS[currentChain].name);
   paintTokenSwitch();
+  paintNotes();
+}
+
+// Subtitle per (chain x token): gas-relief copy for the native
+// tokens, plain factual copy for ZAP (ZAP is not gas money).
+// amountStr / burnStr are display-formatted; defaults are used until
+// /status answers with the live values.
+function paintSub(amountStr, burnStr) {
+  if (isZap()) {
+    $("subText").innerHTML = S.subZap(amountStr || "1", burnStr || "0.5");
+  } else {
+    $("subText").innerHTML = S.sub(CHAINS[currentChain].name, sym());
+  }
+}
+
+// The balance-gate note and the "small amounts" note also follow the
+// selection: ZAP has no balance gate and no gas-relief framing.
+function paintNotes(amountStr) {
+  const gateEl = $("gateNote");
+  if (gateEl) {
+    gateEl.innerHTML = isZap()
+      ? S.gateNoteZap
+      : S.gateNote(amountStr || defaultAmountDisplay(), sym());
+  }
+  const smallEl = $("smallNote");
+  if (smallEl) {
+    smallEl.textContent = isZap() ? S.smallNoteZap : S.smallNote;
+  }
+}
+
+function defaultAmountDisplay() {
+  if (currentChain === "ql1") return "10,000,000";
+  return "0.05";
+}
+
+// Prominent stock line: the faucet's balance of the selected token
+// plus the remaining claim count (the Worker's claimsLeft already
+// divides by the full per-claim cost, 1.5 ZAP for ZAP). Hidden while
+// the faucet is not_ready — the balance is unknown then.
+function paintStock(st) {
+  const el = $("stockLine");
+  if (!el) return;
+  if (!st || st.balance == null || typeof st.claimsLeft !== "number") {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  el.hidden = false;
+  el.textContent = S.stock(
+    fmtDisplay(st.balance),
+    sym(),
+    fmtDisplay(String(st.claimsLeft))
+  );
 }
 
 // Token chips exist only on 42 Chain; QL1 always serves native QOM.
@@ -198,12 +267,17 @@ async function loadStatus() {
     if (chain !== currentChain || token !== currentToken) return null; // user switched meanwhile
     lastStatus = st;
     $("claimAmount").textContent = fmtDisplay(st.claimAmount) + " " + sym();
-    $("gateAmount").textContent = S.gate(fmtDisplay(st.claimAmount), sym());
+    paintSub(
+      fmtDisplay(st.claimAmount),
+      st.burnPerClaim ? fmtDisplay(st.burnPerClaim) : null
+    );
+    paintNotes(fmtDisplay(st.claimAmount));
     if (st.reason === "not_ready" || (!st.ready && !st.faucetAddress)) {
       statusEl.textContent = S.notReady;
       $("faucetBalance").textContent = "—";
       $("claimsLeft").textContent = "";
       $("faucetAddr").textContent = "—";
+      paintStock(null);
       paintBurn(st);
       claimBtn.disabled = true;
       return st;
@@ -212,6 +286,7 @@ async function loadStatus() {
     $("faucetBalance").textContent = fmtDisplay(st.balance) + " " + sym();
     $("claimsLeft").textContent =
       typeof st.claimsLeft === "number" ? S.claimsLeft(st.claimsLeft) : "";
+    paintStock(st);
     paintBurn(st);
     if (!st.ready) {
       statusEl.textContent = S.faucetLow(fmtDisplay(st.balance), sym());
@@ -224,6 +299,7 @@ async function loadStatus() {
   } catch (e) {
     if (chain !== currentChain || token !== currentToken) return null;
     statusEl.textContent = S.statusError;
+    paintStock(null);
     paintBurn(null);
     claimBtn.disabled = true;
     return null;
