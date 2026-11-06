@@ -15,6 +15,11 @@ button:disabled { opacity: .5; cursor: default; }
 .chain-switch { display: flex; background: #0f1420; border: 1px solid #33415e; border-radius: 10px; padding: 3px; margin-bottom: 14px; }
 .chain-switch .chain-btn { flex: 1; background: transparent; color: #aab4c4; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
 .chain-switch .chain-btn.active { background: #2470d8; color: #fff; font-weight: 700; }
+/* token chips: only on 42 Chain ([42] / ZAP); hidden on QL1 */
+.token-switch { display: flex; gap: 6px; margin-bottom: 14px; }
+.token-switch[hidden] { display: none; }
+.token-switch .token-btn { background: #0f1420; color: #aab4c4; border: 1px solid #33415e; border-radius: 999px; padding: 6px 18px; font-size: 13px; }
+.token-switch .token-btn.active { background: #2470d8; color: #fff; font-weight: 700; border-color: #2470d8; }
 .panel h2 { font-size: 16px; margin: 0 0 10px; }
 .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .info-card { background: #1e2740; border-radius: 10px; padding: 12px; }
@@ -32,6 +37,12 @@ button:disabled { opacity: .5; cursor: default; }
 .result a { color: #8fd0ff; }
 .faucet-addr { margin-top: 14px; border-top: 1px solid #26314a; padding-top: 10px; display: flex; flex-direction: column; gap: 2px; }
 .mono { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+/* public recipients list */
+.claims-total { font-size: 14px; font-weight: 700; margin: 0 0 6px; }
+.claims-empty { color: #8d99ae; font-size: 13px; margin: 6px 0 0; }
+.claim-item { padding: 8px 0; border-top: 1px solid #26314a; }
+.claim-item .mono { font-size: 13px; }
+.claim-meta { color: #8d99ae; font-size: 12px; margin-top: 2px; }
 .notes { color: #c3cad7; line-height: 1.7; font-size: 13px; padding-left: 18px; margin: 0; }
 a { color: #8fd0ff; }
 footer { max-width: 760px; margin: 0 auto; padding: 4px 16px 28px; color: #8d99ae; font-size: 12px; line-height: 1.6; }

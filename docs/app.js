@@ -2,7 +2,8 @@
 // The page language comes from <html lang>; all strings live below.
 // The chain ([42 Chain | QL1] tabs, like the GuppyWallet Home switch)
 // is kept in localStorage and every number, balance and explorer link
-// follows the selected chain.
+// follows the selected chain. On 42 Chain there is also a token switch
+// ([42] / ZAP chips); QL1 always serves its native QOM.
 //
 // TURNSTILE_SITEKEY: leave "" to disable the Turnstile widget. When a
 // sitekey is set here, the widget appears and its token is sent with
@@ -30,6 +31,9 @@ const S = {
     faucetLow: (bal, sym) => `The faucet is low on funds (${bal} ${sym} left) and is paused. Please try again later.`,
     statusError: "Could not reach the faucet server. Please reload the page.",
     claimsLeft: (n) => `About ${n} claims left`,
+    claimsTotal: (n) => `Total: ${n} claim${n === 1 ? "" : "s"} so far`,
+    claimsEmpty: "No one has claimed yet.",
+    claimsError: "Could not load the list.",
     addrLabel: (name) => `Your ${name} address (0x…)`,
     gate: (amount, sym) => `${amount} ${sym}`,
     invalidAddress: "That doesn't look like a valid address. Check it and try again.",
@@ -56,6 +60,9 @@ const S = {
     faucetLow: (bal, sym) => `フォーセットの残りが少ないため（残り ${bal} ${sym}）、配布を止めています。また後で来てください。`,
     statusError: "フォーセットのサーバーにつながりませんでした。ページを再読み込みしてください。",
     claimsLeft: (n) => `あと約 ${n} 回分あります`,
+    claimsTotal: (n) => `合計 ${n} 件`,
+    claimsEmpty: "まだ受け取った人はいません。",
+    claimsError: "一覧を読み込めませんでした。",
     addrLabel: (name) => `あなたの ${name} アドレス（0x…）`,
     gate: (amount, sym) => `${amount} ${sym} 未満`,
     invalidAddress: "アドレスの形が違うようです。確認してもう一度どうぞ。",
@@ -81,6 +88,19 @@ try {
   const saved = localStorage.getItem("faucet42_chain");
   if (saved && CHAINS[saved]) currentChain = saved;
 } catch (e) { /* storage unavailable: default 42 Chain */ }
+
+// ---- current token on 42 Chain (persisted); QL1 is always native ----
+const TOKENS_42 = { native: "[42]", zap: "ZAP" };
+let currentToken = "native";
+try {
+  const saved = localStorage.getItem("faucet42_token");
+  if (saved && TOKENS_42[saved]) currentToken = saved;
+} catch (e) { /* storage unavailable: default native */ }
+
+function symFor(chain, token) {
+  if (chain === "ql1") return CHAINS.ql1.symbol;
+  return TOKENS_42[token] || TOKENS_42.native;
+}
 
 // ---- language selector (top-right, persisted) ----
 (function initLang() {
@@ -111,7 +131,7 @@ function fmtDisplay(numStr) {
 }
 
 function sym() {
-  return CHAINS[currentChain].symbol;
+  return symFor(currentChain, currentToken);
 }
 
 function setResult(html, isError) {
@@ -124,16 +144,29 @@ function paintChainTabs() {
   $("chainBtnQl1").classList.toggle("active", currentChain === "ql1");
   $("subText").innerHTML = S.sub(CHAINS[currentChain].name, sym());
   $("addrLabel").textContent = S.addrLabel(CHAINS[currentChain].name);
+  paintTokenSwitch();
+}
+
+// Token chips exist only on 42 Chain; QL1 always serves native QOM.
+function paintTokenSwitch() {
+  const box = $("tokenSwitch");
+  if (!box) return;
+  box.hidden = currentChain !== "42";
+  $("tokenBtnNative").classList.toggle("active", currentToken === "native");
+  $("tokenBtnZap").classList.toggle("active", currentToken === "zap");
 }
 
 async function loadStatus() {
   const chain = currentChain;
+  const token = currentToken;
   statusEl.textContent = S.loading;
   claimBtn.disabled = true;
   try {
-    const res = await fetch(CONFIG.WORKER_URL + "/status?chain=" + chain);
+    const res = await fetch(
+      CONFIG.WORKER_URL + "/status?chain=" + chain + "&token=" + token
+    );
     const st = await res.json();
-    if (chain !== currentChain) return null; // user switched meanwhile
+    if (chain !== currentChain || token !== currentToken) return null; // user switched meanwhile
     lastStatus = st;
     $("claimAmount").textContent = fmtDisplay(st.claimAmount) + " " + sym();
     $("gateAmount").textContent = S.gate(fmtDisplay(st.claimAmount), sym());
@@ -158,7 +191,7 @@ async function loadStatus() {
     }
     return st;
   } catch (e) {
-    if (chain !== currentChain) return null;
+    if (chain !== currentChain || token !== currentToken) return null;
     statusEl.textContent = S.statusError;
     claimBtn.disabled = true;
     return null;
@@ -173,10 +206,89 @@ function switchChain(chain) {
   resultEl.className = "result";
   paintChainTabs();
   loadStatus();
+  loadClaims();
 }
 
 $("chainBtn42").addEventListener("click", () => switchChain("42"));
 $("chainBtnQl1").addEventListener("click", () => switchChain("ql1"));
+
+function switchToken(token) {
+  if (!TOKENS_42[token] || token === currentToken) return;
+  currentToken = token;
+  try { localStorage.setItem("faucet42_token", token); } catch (e) { /* ignore */ }
+  setResult("", false);
+  resultEl.className = "result";
+  paintChainTabs();
+  loadStatus();
+  loadClaims();
+}
+
+$("tokenBtnNative").addEventListener("click", () => switchToken("native"));
+$("tokenBtnZap").addEventListener("click", () => switchToken("zap"));
+
+// ---- public recipients list (per chain x token) ----
+async function loadClaims() {
+  const chain = currentChain;
+  const token = currentToken;
+  const totalEl = $("claimsTotal");
+  const listEl = $("claimsList");
+  if (!totalEl || !listEl) return;
+  try {
+    const res = await fetch(
+      CONFIG.WORKER_URL + "/claims?chain=" + chain + "&token=" + token
+    );
+    const data = await res.json();
+    if (chain !== currentChain || token !== currentToken) return; // switched meanwhile
+    totalEl.textContent = S.claimsTotal(data.total || 0);
+    listEl.textContent = "";
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) {
+      const p = document.createElement("p");
+      p.className = "claims-empty";
+      p.textContent = S.claimsEmpty;
+      listEl.appendChild(p);
+      return;
+    }
+    const sym = symFor(chain, token);
+    for (const it of items) {
+      const row = document.createElement("div");
+      row.className = "claim-item";
+      const a = document.createElement("a");
+      a.href = it.addressUrl;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.className = "mono";
+      a.textContent = it.address;
+      row.appendChild(a);
+      const meta = document.createElement("div");
+      meta.className = "claim-meta";
+      const amt = document.createElement("span");
+      amt.textContent = fmtDisplay(it.amount) + " " + sym;
+      meta.appendChild(amt);
+      meta.appendChild(document.createTextNode(" · "));
+      const tx = document.createElement("a");
+      tx.href = it.txUrl;
+      tx.target = "_blank";
+      tx.rel = "noopener";
+      tx.textContent = "tx";
+      meta.appendChild(tx);
+      meta.appendChild(document.createTextNode(" · "));
+      const time = document.createElement("span");
+      time.textContent = new Date((it.ts || 0) * 1000).toLocaleString();
+      meta.appendChild(time);
+      row.appendChild(meta);
+      listEl.appendChild(row);
+    }
+  } catch (e) {
+    if (chain !== currentChain || token !== currentToken) return;
+    totalEl.textContent = "";
+    listEl.textContent = "";
+    const p = document.createElement("p");
+    p.className = "claims-empty";
+    p.textContent = S.claimsError;
+    listEl.appendChild(p);
+  }
+}
 
 // ---- optional Turnstile ----
 function initTurnstile() {
@@ -241,18 +353,19 @@ async function claim() {
     }
   }
   const chain = currentChain;
+  const ftoken = currentToken;
   claimBtn.disabled = true;
   setResult(S.sending, false);
   try {
     const res = await fetch(CONFIG.WORKER_URL + "/claim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chain, address, turnstileToken: token }),
+      body: JSON.stringify({ chain, token: ftoken, address, turnstileToken: token }),
     });
     const data = await res.json();
     if (data.ok) {
       setResult(
-        S.sent(fmtDisplay(data.amount), CHAINS[data.chain || chain].symbol, data.explorerUrl, data.txHash),
+        S.sent(fmtDisplay(data.amount), symFor(chain, ftoken), data.explorerUrl, data.txHash),
         false
       );
     } else {
@@ -262,7 +375,10 @@ async function claim() {
     setResult(S.err_generic, true);
   } finally {
     resetTurnstile();
-    if (chain === currentChain) await loadStatus();
+    if (chain === currentChain) {
+      await loadStatus();
+      loadClaims();
+    }
   }
 }
 
@@ -274,3 +390,4 @@ addrInput.addEventListener("keydown", (e) => {
 paintChainTabs();
 initTurnstile();
 loadStatus();
+loadClaims();

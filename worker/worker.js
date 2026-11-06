@@ -1,12 +1,13 @@
 // Faucet worker — 42 Chain (mainnet) + QL1, one worker for both chains.
 //
-// Gives a small amount of the chain's native token to addresses that
-// hold less than one claim amount, so newcomers can pay gas:
-//   - 42 Chain (EVM 421018): [42],  default claim 0.05 [42]
-//   - QL1      (EVM 766):    QOM,   default claim 10,000,000 QOM
+// Gives a small amount of a token to addresses that hold less than one
+// claim amount, as gas relief:
+//   - 42 Chain (EVM 421018): [42] (native), default claim 0.05 [42]
+//   - 42 Chain (EVM 421018): ZAP (ERC-20),  default claim 1 ZAP
+//   - QL1      (EVM 766):    QOM (native),  default claim 10,000,000 QOM
 //
 // Private keys are read ONLY from Worker secrets, one per chain:
-//   FAUCET_PRIVATE_KEY_42    for 42 Chain
+//   FAUCET_PRIVATE_KEY_42    for 42 Chain (both [42] and ZAP claims)
 //   FAUCET_PRIVATE_KEY_QL1   for QL1
 // A chain whose secret is not set answers "not_ready" for that chain
 // only; the other chain keeps working. No key is ever stored in this
@@ -15,47 +16,84 @@
 // Bindings / variables:
 //   FAUCET_KV           (KV namespace binding, required: rate limits)
 //   CLAIM_AMOUNT_42     (plain variable, optional, default "0.05")
+//   CLAIM_AMOUNT_ZAP    (plain variable, optional, default "1")
 //   CLAIM_AMOUNT_QOM    (plain variable, optional, default "10000000")
 //   TURNSTILE_SECRET    (secret, optional: enables Turnstile checks)
 //
-// Abuse limits, applied independently per chain (KV keys are
-// namespaced "<chain>:..."):
+// Abuse limits, applied independently per (chain x token) pair (KV
+// keys are namespaced "<chain>:<token>:..."):
 //   - same address: 1 claim per 7 days
 //   - same IP:      1 claim per 24 hours
-//   - recipient must hold less than one claim amount
-//   - global cap:   100 claims per day (UTC) per chain
-//   - distribution pauses when the faucet balance drops below
-//     5 x the claim amount
+//   - recipient must hold less than one claim amount of that token
+//   - global cap:   100 claims per day (UTC) per (chain x token)
+//   - distribution pauses when the faucet's balance of that token
+//     drops below 5 x the claim amount
+//
+// Claim history, in the same KV under the same namespace (no key
+// collisions with the limit keys): every successful claim stores one
+// record at "<chain>:<token>:claim:<zero-padded ts>:<txHash>" and
+// bumps the cumulative counter at "<chain>:<token>:total". GET /claims
+// lists the newest records (prefix scan, newest first) plus the total.
 
 import { ethers } from "ethers";
+
+// ZAP on 42 Chain (ERC-20, 18 decimals).
+const ZAP_CONTRACT = "0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B256";
+
+const ERC20_IFACE = new ethers.Interface([
+  "function balanceOf(address) view returns (uint256)",
+  "function transfer(address, uint256) returns (bool)",
+]);
 
 const CHAINS = {
   "42": {
     id: "42",
     chainId: 421018,
-    symbol: "42",
     rpcs: [
       "https://evm-rpc.infinitepanda.xyz",
       "https://evm-rpc-infinite.mschihuahua.org",
     ],
     explorerTx: "https://scan.infinitedrive.xyz/tx/",
+    explorerAddr: "https://scan.infinitedrive.xyz/address/",
     keyEnv: "FAUCET_PRIVATE_KEY_42",
-    amountEnv: "CLAIM_AMOUNT_42",
-    defaultAmount: "0.05",
+    tokens: {
+      native: {
+        id: "native",
+        symbol: "42",
+        contract: null,
+        amountEnv: "CLAIM_AMOUNT_42",
+        defaultAmount: "0.05",
+      },
+      zap: {
+        id: "zap",
+        symbol: "ZAP",
+        contract: ZAP_CONTRACT,
+        amountEnv: "CLAIM_AMOUNT_ZAP",
+        defaultAmount: "1",
+      },
+    },
   },
   ql1: {
     id: "ql1",
     chainId: 766,
-    symbol: "QOM",
     rpcs: ["https://evm-rpc-ql1.mschihuahua.org"],
     explorerTx: "https://scan.qom.network/tx/",
+    explorerAddr: "https://scan.qom.network/address/",
     keyEnv: "FAUCET_PRIVATE_KEY_QL1",
-    amountEnv: "CLAIM_AMOUNT_QOM",
-    defaultAmount: "10000000",
+    tokens: {
+      native: {
+        id: "native",
+        symbol: "QOM",
+        contract: null,
+        amountEnv: "CLAIM_AMOUNT_QOM",
+        defaultAmount: "10000000",
+      },
+    },
   },
 };
 
-const GAS_LIMIT = 21000n;
+const NATIVE_GAS_LIMIT = 21000n;
+const ERC20_GAS_FALLBACK = 65000n;
 const LOW_BALANCE_CLAIMS = 5n;
 const ADDRESS_COOLDOWN_SEC = 7 * 24 * 3600;
 const IP_COOLDOWN_SEC = 24 * 3600;
@@ -79,6 +117,15 @@ function chainOf(v) {
   return CHAINS[String(v || "42").toLowerCase()] || null;
 }
 
+// Default is the chain's native token ("native"); an unknown token id
+// for the chain returns null so the caller can reject it. On QL1 the
+// native token may also be named "qom".
+function tokenOf(cfg, v) {
+  let id = String(v || "native").toLowerCase();
+  if (cfg.id === "ql1" && id === "qom") id = "native";
+  return cfg.tokens[id] || null;
+}
+
 // Decimal string for a wei value ("0.0500" -> "0.05", "10000000.0" -> "10000000").
 function fmt(wei) {
   const s = ethers.formatEther(wei);
@@ -88,13 +135,13 @@ function fmt(wei) {
   return frac ? int + "." + frac : int;
 }
 
-function claimAmountWei(env, cfg) {
-  const raw = String(env[cfg.amountEnv] || cfg.defaultAmount).trim();
+function claimAmountWei(env, tok) {
+  const raw = String(env[tok.amountEnv] || tok.defaultAmount).trim();
   try {
     const v = ethers.parseEther(raw);
     if (v > 0n) return v;
   } catch (e) { /* fall through to default */ }
-  return ethers.parseEther(cfg.defaultAmount);
+  return ethers.parseEther(tok.defaultAmount);
 }
 
 function getWallet(env, cfg) {
@@ -127,18 +174,46 @@ async function rpc(cfg, method, params) {
   throw lastErr || new Error("all RPC endpoints failed");
 }
 
-async function getBalance(cfg, address) {
+async function getNativeBalance(cfg, address) {
   return BigInt(await rpc(cfg, "eth_getBalance", [address, "latest"]));
 }
 
-async function handleStatus(env, cfg) {
-  const amount = claimAmountWei(env, cfg);
-  const base = { chain: cfg.id, symbol: cfg.symbol, claimAmount: fmt(amount) };
+// Balance of the given token: native balance for "native", ERC-20
+// balanceOf for contract tokens.
+async function getTokenBalance(cfg, tok, address) {
+  if (!tok.contract) return getNativeBalance(cfg, address);
+  const data = ERC20_IFACE.encodeFunctionData("balanceOf", [address]);
+  const out = await rpc(cfg, "eth_call", [{ to: tok.contract, data }, "latest"]);
+  return BigInt(out);
+}
+
+// Gas limit for an ERC-20 transfer: estimated on-chain, with a fixed
+// fallback if the estimate call fails.
+async function estimateErc20Gas(cfg, tok, from, to, amount) {
+  try {
+    const data = ERC20_IFACE.encodeFunctionData("transfer", [to, amount]);
+    const est = await rpc(cfg, "eth_estimateGas", [
+      { from, to: tok.contract, data },
+    ]);
+    const v = BigInt(est);
+    if (v > 0n) return v;
+  } catch (e) { /* fall through to the fallback */ }
+  return ERC20_GAS_FALLBACK;
+}
+
+async function handleStatus(env, cfg, tok) {
+  const amount = claimAmountWei(env, tok);
+  const base = {
+    chain: cfg.id,
+    token: tok.id,
+    symbol: tok.symbol,
+    claimAmount: fmt(amount),
+  };
   const wallet = getWallet(env, cfg);
   if (!wallet) return json({ ready: false, reason: "not_ready", ...base });
   let balance;
   try {
-    balance = await getBalance(cfg, wallet.address);
+    balance = await getTokenBalance(cfg, tok, wallet.address);
   } catch (e) {
     return json({ ready: false, reason: "rpc_error", faucetAddress: wallet.address, ...base });
   }
@@ -163,7 +238,9 @@ async function handleClaim(request, env) {
   }
   const cfg = chainOf(body.chain);
   if (!cfg) return json({ ok: false, code: "bad_chain" }, 400);
-  const meta = { chain: cfg.id, symbol: cfg.symbol };
+  const tok = tokenOf(cfg, body.token);
+  if (!tok) return json({ ok: false, code: "bad_token", chain: cfg.id }, 400);
+  const meta = { chain: cfg.id, token: tok.id, symbol: tok.symbol };
 
   const wallet = getWallet(env, cfg);
   if (!wallet) return json({ ok: false, code: "not_ready", ...meta }, 503);
@@ -198,9 +275,9 @@ async function handleClaim(request, env) {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const ns = cfg.id + ":";
+  const ns = cfg.id + ":" + tok.id + ":";
 
-  // Same address: 1 claim per 7 days (per chain).
+  // Same address: 1 claim per 7 days (per chain x token).
   const addrKey = ns + "addr:" + address.toLowerCase();
   const prevAddr = await kv.get(addrKey);
   if (prevAddr) {
@@ -210,7 +287,7 @@ async function handleClaim(request, env) {
     }
   }
 
-  // Same IP: 1 claim per 24 hours (per chain).
+  // Same IP: 1 claim per 24 hours (per chain x token).
   const ipKey = ns + "ip:" + ip;
   const prevIp = await kv.get(ipKey);
   if (prevIp) {
@@ -220,40 +297,64 @@ async function handleClaim(request, env) {
     }
   }
 
-  // Global daily cap (UTC day, per chain).
+  // Global daily cap (UTC day, per chain x token).
   const dayKey = ns + "day:" + new Date().toISOString().slice(0, 10);
   const dayCount = Number((await kv.get(dayKey)) || 0);
   if (dayCount >= DAILY_LIMIT) {
     return json({ ok: false, code: "daily_limit", ...meta }, 429);
   }
 
-  const amount = claimAmountWei(env, cfg);
+  const amount = claimAmountWei(env, tok);
 
-  let recipientBalance, faucetBalance, gasPrice;
+  let recipientBalance, faucetTokenBalance, gasPrice, gasLimit;
   try {
-    recipientBalance = await getBalance(cfg, address);
+    recipientBalance = await getTokenBalance(cfg, tok, address);
     // Gas relief only: an address already holding at least one claim
-    // amount does not need the faucet.
+    // amount of this token does not need the faucet. (For ZAP claims
+    // only the ZAP balance is checked; the [42] balance is ignored.)
     if (recipientBalance >= amount) {
       return json({ ok: false, code: "balance_too_high", balance: fmt(recipientBalance), ...meta }, 400);
     }
-    faucetBalance = await getBalance(cfg, wallet.address);
+    faucetTokenBalance = await getTokenBalance(cfg, tok, wallet.address);
     // Gas price is read at send time on each chain (the QL1 floor is
     // high, so never hardcode it).
     gasPrice = BigInt(await rpc(cfg, "eth_gasPrice", []));
+    gasLimit = tok.contract
+      ? await estimateErc20Gas(cfg, tok, wallet.address, address, amount)
+      : NATIVE_GAS_LIMIT;
   } catch (e) {
     return json({ ok: false, code: "rpc_error", ...meta }, 502);
   }
 
-  // Pause when the faucet runs low (below 5 claims) or cannot cover
-  // this claim plus its gas.
-  const needed = amount + gasPrice * GAS_LIMIT;
-  if (faucetBalance < amount * LOW_BALANCE_CLAIMS || faucetBalance < needed) {
-    return json({ ok: false, code: "faucet_low", balance: fmt(faucetBalance), ...meta }, 503);
+  // Pause when the faucet's balance of this token runs low (below 5
+  // claims). The gas itself is always paid in the chain's native
+  // token, so for an ERC-20 claim the wallet's native balance only has
+  // to cover the gas.
+  if (faucetTokenBalance < amount * LOW_BALANCE_CLAIMS) {
+    return json({ ok: false, code: "faucet_low", balance: fmt(faucetTokenBalance), ...meta }, 503);
+  }
+  let faucetNativeBalance = faucetTokenBalance;
+  if (tok.contract) {
+    try {
+      faucetNativeBalance = await getNativeBalance(cfg, wallet.address);
+    } catch (e) {
+      return json({ ok: false, code: "rpc_error", ...meta }, 502);
+    }
+  }
+  if (faucetNativeBalance < gasPrice * gasLimit) {
+    return json({ ok: false, code: "faucet_low", balance: fmt(faucetTokenBalance), ...meta }, 503);
   }
 
-  // Sign and broadcast a plain native transfer (21,000 gas). One retry
-  // on a stale nonce, in case two claims raced.
+  // Sign and broadcast: a plain native transfer (21,000 gas) or an
+  // ERC-20 transfer() call. One retry on a stale nonce, in case two
+  // claims raced.
+  const txBase = tok.contract
+    ? {
+        to: tok.contract,
+        value: 0n,
+        data: ERC20_IFACE.encodeFunctionData("transfer", [address, amount]),
+      }
+    : { to: address, value: amount };
   let txHash = null;
   for (let attempt = 0; attempt < 2 && !txHash; attempt++) {
     try {
@@ -261,9 +362,8 @@ async function handleClaim(request, env) {
         await rpc(cfg, "eth_getTransactionCount", [wallet.address, "pending"])
       );
       const signed = await wallet.signTransaction({
-        to: address,
-        value: amount,
-        gasLimit: Number(GAS_LIMIT),
+        ...txBase,
+        gasLimit: Number(gasLimit),
         gasPrice,
         nonce,
         chainId: cfg.chainId,
@@ -285,6 +385,19 @@ async function handleClaim(request, env) {
   }
   await kv.put(dayKey, String(dayCount + 1), { expirationTtl: DAY_KEY_TTL_SEC });
 
+  // Claim history for the public recipients list: a cumulative counter
+  // plus one record per claim, keyed by zero-padded timestamp so a KV
+  // prefix list comes back in chronological order (read newest-first
+  // by /claims). The "claim:" prefix cannot collide with the limit
+  // keys ("addr:" / "ip:" / "day:" / "total").
+  const prevTotal = Number((await kv.get(ns + "total")) || 0);
+  await kv.put(ns + "total", String(prevTotal + 1));
+  const recKey = ns + "claim:" + String(now).padStart(12, "0") + ":" + txHash;
+  await kv.put(
+    recKey,
+    JSON.stringify({ address, amount: fmt(amount), txHash, ts: now })
+  );
+
   return json({
     ok: true,
     txHash,
@@ -292,6 +405,38 @@ async function handleClaim(request, env) {
     explorerUrl: cfg.explorerTx + txHash,
     ...meta,
   });
+}
+
+const CLAIMS_LIST_MAX = 100;
+
+// Public recipients list: cumulative total + the newest claim records
+// for one (chain x token). Read-only; works before any key is set
+// (the log is simply empty until the first real claim).
+async function handleClaims(env, cfg, tok) {
+  const base = { chain: cfg.id, token: tok.id, symbol: tok.symbol };
+  const kv = env.FAUCET_KV;
+  if (!kv) return json({ ok: false, code: "misconfigured", ...base }, 500);
+  const ns = cfg.id + ":" + tok.id + ":";
+  const total = Number((await kv.get(ns + "total")) || 0);
+  const listed = await kv.list({ prefix: ns + "claim:", limit: 1000 });
+  const keys = listed.keys.map((k) => k.name).sort().reverse();
+  const items = [];
+  for (const key of keys.slice(0, CLAIMS_LIST_MAX)) {
+    const raw = await kv.get(key);
+    if (!raw) continue;
+    try {
+      const rec = JSON.parse(raw);
+      items.push({
+        address: rec.address,
+        amount: rec.amount,
+        txHash: rec.txHash,
+        ts: rec.ts,
+        txUrl: cfg.explorerTx + rec.txHash,
+        addressUrl: cfg.explorerAddr + rec.address,
+      });
+    } catch (e) { /* skip a corrupt record */ }
+  }
+  return json({ total, items, ...base });
 }
 
 export default {
@@ -304,16 +449,27 @@ export default {
       if (url.pathname === "/status" && request.method === "GET") {
         const cfg = chainOf(url.searchParams.get("chain"));
         if (!cfg) return json({ ok: false, code: "bad_chain" }, 400);
-        return await handleStatus(env, cfg);
+        const tok = tokenOf(cfg, url.searchParams.get("token"));
+        if (!tok) return json({ ok: false, code: "bad_token", chain: cfg.id }, 400);
+        return await handleStatus(env, cfg, tok);
       }
       if (url.pathname === "/claim" && request.method === "POST") {
         return await handleClaim(request, env);
       }
+      if (url.pathname === "/claims" && request.method === "GET") {
+        const cfg = chainOf(url.searchParams.get("chain"));
+        if (!cfg) return json({ ok: false, code: "bad_chain" }, 400);
+        const tok = tokenOf(cfg, url.searchParams.get("token"));
+        if (!tok) return json({ ok: false, code: "bad_token", chain: cfg.id }, 400);
+        return await handleClaims(env, cfg, tok);
+      }
       if (url.pathname === "/" && request.method === "GET") {
         return new Response(
           "42 Chain & QL1 Faucet Worker\n" +
-            "GET  /status?chain=42|ql1\n" +
-            "POST /claim {\"chain\": \"42\"|\"ql1\", \"address\": \"0x...\"}\n",
+            "GET  /status?chain=42|ql1[&token=native|zap]\n" +
+            "GET  /claims?chain=42|ql1[&token=native|zap]\n" +
+            "POST /claim {\"chain\": \"42\"|\"ql1\", \"token\": \"native\"|\"zap\", \"address\": \"0x...\"}\n" +
+            "(token defaults to \"native\"; \"zap\" is 42 Chain only; on QL1 \"qom\" also names the native token)\n",
           { headers: { "Content-Type": "text/plain", ...CORS } }
         );
       }
