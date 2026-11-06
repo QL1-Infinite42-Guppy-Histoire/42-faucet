@@ -27,7 +27,7 @@ ZAP is an ERC-20 on 42 Chain (contract `0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B2
 - 同じ回線（IP）は24時間に1回まで / 1 claim per IP every 24 hours
 - [42] と QOM は、そのトークンの残高が「1回分以上」あるアドレスには配りません（[42]: 0.05 以上、QOM: 10,000,000 QOM 以上は不可。判定は対象トークンの残高だけです）。**ZAP だけは例外で残高ゲートが無く、すでに ZAP を持っているアドレスでも受け取れます** / For [42] and QOM, addresses already holding at least one claim amount of that token cannot claim (only that token's balance counts). **ZAP is the exception: no balance gate — existing ZAP holders can claim too**
 - 組み合わせごとに1日100回まで / 100 claims per day per (chain × token)
-- フォーセットのそのトークンの残高が「1回分の消費×5」未満になると自動で配布停止（ZAP は 1.5 ZAP × 5 = 7.5 ZAP 未満で停止）/ Distribution pauses when the faucet's balance of that token drops below 5 claims' worth (for ZAP, one claim's cost is 1.5 ZAP including the burn)
+- フォーセットのそのトークンの残高が「1回分の消費」未満になると自動で配布停止（ZAP は配布1＋燃焼0.5＝1.5 ZAP 未満で停止）/ Distribution pauses when the faucet's balance of that token drops below 1 claim's worth (for ZAP, one claim's cost is 1.5 ZAP including the burn)
 
 ## 仕組み / How it works
 

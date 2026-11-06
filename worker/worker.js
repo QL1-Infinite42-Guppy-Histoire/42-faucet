@@ -115,7 +115,7 @@ const CHAINS = {
 
 const NATIVE_GAS_LIMIT = 21000n;
 const ERC20_GAS_FALLBACK = 65000n;
-const LOW_BALANCE_CLAIMS = 5n;
+const LOW_BALANCE_CLAIMS = 1n;
 const ADDRESS_COOLDOWN_SEC = 7 * 24 * 3600;
 const IP_COOLDOWN_SEC = 24 * 3600;
 const DAILY_LIMIT = 100;
@@ -415,7 +415,7 @@ async function handleClaim(request, env) {
   }
 
   // Pause when the faucet's balance of this token runs low: one claim
-  // consumes (amount + burn), and distribution pauses below 5 claims'
+  // consumes (amount + burn), and distribution pauses below 1 claim's
   // worth of that combined cost. The gas itself is always paid in the
   // chain's native token, so for an ERC-20 claim the wallet's native
   // balance only has to cover the gas of both transfers.
