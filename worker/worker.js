@@ -6,18 +6,6 @@
 //   - 42 Chain (EVM 421018): ZAP (ERC-20),  default claim 1 ZAP
 //   - QL1      (EVM 766):    QOM (native),  default claim 10,000,000 QOM
 //
-// Every successful ZAP claim additionally burns 0.5 ZAP from the
-// faucet wallet to the burn address 0x000…dEaD (a second ERC-20
-// transfer right after the claim transfer), so one ZAP claim consumes
-// 1.5 ZAP of stock. If only the burn transfer fails, the claim still
-// counts (the claim transfer cannot be rolled back) and the failure
-// is logged. The cumulative burned total shown by /status counts
-// ONLY burns executed by this faucet: a KV counter at "<chain>:
-// <token>:burned" (wei, decimal string) is incremented by the burn
-// amount whenever — and only when — a claim's burn transfer
-// succeeds. (The burn address's overall on-chain ZAP balance also
-// includes other people's burns and is NOT what is displayed.)
-//
 // Private keys are read ONLY from Worker secrets, one per chain:
 //   FAUCET_PRIVATE_KEY_42    for 42 Chain (both [42] and ZAP claims)
 //   FAUCET_PRIVATE_KEY_QL1   for QL1
@@ -29,7 +17,6 @@
 //   FAUCET_KV           (KV namespace binding, required: rate limits)
 //   CLAIM_AMOUNT_42     (plain variable, optional, default "0.05")
 //   CLAIM_AMOUNT_ZAP    (plain variable, optional, default "1")
-//   CLAIM_BURN_ZAP      (plain variable, optional, default "0.5")
 //   CLAIM_AMOUNT_QOM    (plain variable, optional, default "10000000")
 //   TURNSTILE_SECRET    (secret, optional: enables Turnstile checks)
 //
@@ -42,7 +29,7 @@
 //     holders may claim too)
 //   - global cap:   100 claims per day (UTC) per (chain x token)
 //   - distribution pauses when the faucet's balance of that token
-//     drops below 5 x the claim amount
+//     drops below 1 claim amount
 //
 // Claim history, in the same KV under the same namespace (no key
 // collisions with the limit keys): every successful claim stores one
@@ -54,9 +41,6 @@ import { ethers } from "ethers";
 
 // ZAP on 42 Chain (ERC-20, 18 decimals).
 const ZAP_CONTRACT = "0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B256";
-
-// Burn address for the per-claim ZAP burn.
-const BURN_ADDRESS = "0x000000000000000000000000000000000000dEaD";
 
 const ERC20_IFACE = new ethers.Interface([
   "function balanceOf(address) view returns (uint256)",
@@ -88,8 +72,6 @@ const CHAINS = {
         contract: ZAP_CONTRACT,
         amountEnv: "CLAIM_AMOUNT_ZAP",
         defaultAmount: "1",
-        burnEnv: "CLAIM_BURN_ZAP",
-        burnDefault: "0.5",
         noGate: true,
       },
     },
@@ -163,17 +145,6 @@ function claimAmountWei(env, tok) {
     if (v > 0n) return v;
   } catch (e) { /* fall through to default */ }
   return ethers.parseEther(tok.defaultAmount);
-}
-
-// Per-claim burn for tokens that define one (ZAP only); 0 otherwise.
-function claimBurnWei(env, tok) {
-  if (!tok.burnEnv) return 0n;
-  const raw = String(env[tok.burnEnv] || tok.burnDefault).trim();
-  try {
-    const v = ethers.parseEther(raw);
-    if (v >= 0n) return v;
-  } catch (e) { /* fall through to default */ }
-  return ethers.parseEther(tok.burnDefault);
 }
 
 function getWallet(env, cfg) {
@@ -261,32 +232,12 @@ async function sendSigned(cfg, wallet, txBase, gasLimit, gasPrice) {
 
 async function handleStatus(env, cfg, tok) {
   const amount = claimAmountWei(env, tok);
-  const burn = claimBurnWei(env, tok);
-  const perClaim = amount + burn;
   const base = {
     chain: cfg.id,
     token: tok.id,
     symbol: tok.symbol,
     claimAmount: fmt(amount),
   };
-  if (burn > 0n) {
-    base.burnPerClaim = fmt(burn);
-    base.burnAddress = BURN_ADDRESS;
-    // Cumulative total burned BY THIS FAUCET ONLY, from its KV
-    // counter ("<chain>:<token>:burned", stored in wei). Starts at
-    // 0 and is incremented only when a claim's burn transfer
-    // succeeds (see handleClaim). The burn address's overall
-    // on-chain balance is deliberately not used here: it includes
-    // ZAP burned by others before/outside this faucet.
-    let burnedWei = 0n;
-    const kv = env.FAUCET_KV;
-    if (kv) {
-      try {
-        burnedWei = BigInt((await kv.get(cfg.id + ":" + tok.id + ":burned")) || "0");
-      } catch (e) { /* keep 0 when the counter cannot be read */ }
-    }
-    base.burnedTotal = fmt(burnedWei);
-  }
   const wallet = getWallet(env, cfg);
   if (!wallet) return json({ ready: false, reason: "not_ready", ...base });
   let balance;
@@ -295,10 +246,9 @@ async function handleStatus(env, cfg, tok) {
   } catch (e) {
     return json({ ready: false, reason: "rpc_error", faucetAddress: wallet.address, ...base });
   }
-  // One claim consumes (amount + burn) of the token, so the remaining
-  // claim count and the low-balance pause both use the combined cost.
-  const claimsLeft = perClaim > 0n ? balance / perClaim : 0n;
-  const ready = balance >= perClaim * LOW_BALANCE_CLAIMS;
+  // One claim consumes exactly one claim amount of the token.
+  const claimsLeft = amount > 0n ? balance / amount : 0n;
+  const ready = balance >= amount * LOW_BALANCE_CLAIMS;
   return json({
     ready,
     reason: ready ? null : "faucet_low",
@@ -385,10 +335,8 @@ async function handleClaim(request, env) {
   }
 
   const amount = claimAmountWei(env, tok);
-  const burn = claimBurnWei(env, tok);
-  const perClaim = amount + burn;
 
-  let faucetTokenBalance, gasPrice, gasLimit, burnGasLimit = 0n;
+  let faucetTokenBalance, gasPrice, gasLimit;
   try {
     // Balance gate ([42] / QOM only): an address already holding at
     // least one claim amount of the token does not need gas relief.
@@ -407,19 +355,15 @@ async function handleClaim(request, env) {
     gasLimit = tok.contract
       ? await estimateErc20Gas(cfg, tok, wallet.address, address, amount)
       : NATIVE_GAS_LIMIT;
-    if (burn > 0n) {
-      burnGasLimit = await estimateErc20Gas(cfg, tok, wallet.address, BURN_ADDRESS, burn);
-    }
   } catch (e) {
     return json({ ok: false, code: "rpc_error", ...meta }, 502);
   }
 
-  // Pause when the faucet's balance of this token runs low: one claim
-  // consumes (amount + burn), and distribution pauses below 1 claim's
-  // worth of that combined cost. The gas itself is always paid in the
-  // chain's native token, so for an ERC-20 claim the wallet's native
-  // balance only has to cover the gas of both transfers.
-  if (faucetTokenBalance < perClaim * LOW_BALANCE_CLAIMS) {
+  // Pause when the faucet's balance of this token runs low:
+  // distribution pauses below 1 claim's worth. The gas itself is
+  // always paid in the chain's native token, so for an ERC-20 claim
+  // the wallet's native balance only has to cover the transfer gas.
+  if (faucetTokenBalance < amount * LOW_BALANCE_CLAIMS) {
     return json({ ok: false, code: "faucet_low", balance: fmt(faucetTokenBalance), ...meta }, 503);
   }
   let faucetNativeBalance = faucetTokenBalance;
@@ -430,7 +374,7 @@ async function handleClaim(request, env) {
       return json({ ok: false, code: "rpc_error", ...meta }, 502);
     }
   }
-  if (faucetNativeBalance < gasPrice * (gasLimit + burnGasLimit)) {
+  if (faucetNativeBalance < gasPrice * gasLimit) {
     return json({ ok: false, code: "faucet_low", balance: fmt(faucetTokenBalance), ...meta }, 503);
   }
 
@@ -453,62 +397,6 @@ async function handleClaim(request, env) {
     return json({ ok: false, code: "send_failed", ...meta }, 502);
   }
 
-  // Burn transfer (ZAP only), sent right after the claim transfer. If
-  // the burn alone fails, the claim still stands — the claim transfer
-  // cannot be rolled back — and the inconsistency is logged so the
-  // operator can reconcile it against the claim record.
-  let burnTxHash = null;
-  if (burn > 0n) {
-    try {
-      burnTxHash = await sendSigned(
-        cfg,
-        wallet,
-        {
-          to: tok.contract,
-          value: 0n,
-          data: ERC20_IFACE.encodeFunctionData("transfer", [BURN_ADDRESS, burn]),
-        },
-        burnGasLimit,
-        gasPrice
-      );
-    } catch (e) {
-      console.error(
-        "burn_failed " +
-          JSON.stringify({
-            chain: cfg.id,
-            token: tok.id,
-            claimTx: txHash,
-            address,
-            burn: fmt(burn),
-            error: String((e && e.message) || e),
-          })
-      );
-    }
-  }
-
-  // Bump the faucet-only burned counter (the value /status returns
-  // as burnedTotal) — ONLY when the burn transfer actually
-  // succeeded, and only by that claim's burn amount. A failed burn
-  // adds nothing. The claim itself already stands either way, so a
-  // counter error here is logged, not fatal.
-  if (burnTxHash) {
-    try {
-      const prevBurned = BigInt((await kv.get(ns + "burned")) || "0");
-      await kv.put(ns + "burned", (prevBurned + burn).toString());
-    } catch (e) {
-      console.error(
-        "burn_counter_failed " +
-          JSON.stringify({
-            chain: cfg.id,
-            token: tok.id,
-            claimTx: txHash,
-            burnTx: burnTxHash,
-            error: String((e && e.message) || e),
-          })
-      );
-    }
-  }
-
   // Record the claim only after a successful broadcast.
   await kv.put(addrKey, String(now), { expirationTtl: ADDRESS_COOLDOWN_SEC });
   if (ip !== "unknown") {
@@ -520,7 +408,7 @@ async function handleClaim(request, env) {
   // plus one record per claim, keyed by zero-padded timestamp so a KV
   // prefix list comes back in chronological order (read newest-first
   // by /claims). The "claim:" prefix cannot collide with the limit
-  // keys ("addr:" / "ip:" / "day:" / "total" / "burned").
+  // keys ("addr:" / "ip:" / "day:" / "total").
   const prevTotal = Number((await kv.get(ns + "total")) || 0);
   await kv.put(ns + "total", String(prevTotal + 1));
   const recKey = ns + "claim:" + String(now).padStart(12, "0") + ":" + txHash;
@@ -534,9 +422,6 @@ async function handleClaim(request, env) {
     txHash,
     amount: fmt(amount),
     explorerUrl: cfg.explorerTx + txHash,
-    ...(burnTxHash
-      ? { burned: fmt(burn), burnTxHash, burnExplorerUrl: cfg.explorerTx + burnTxHash }
-      : {}),
     ...meta,
   });
 }

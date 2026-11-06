@@ -32,9 +32,6 @@ const S = {
     statusError: "Could not reach the faucet server. Please reload the page.",
     claimsLeft: (n) => `About ${n} claims left`,
     claimsTotal: (n) => `Total: ${n} claim${n === 1 ? "" : "s"} so far`,
-    burned: (amt) => `ZAP burned by this faucet: ${amt} ZAP`,
-    burnPerClaimNote: (amt) => `${amt} ZAP is burned with every claim.`,
-    burnAddrLabel: "burn address",
     claimsEmpty: "No one has claimed yet.",
     claimsError: "Could not load the list.",
     addrLabel: (name) => `Your ${name} address (0x…)`,
@@ -70,9 +67,6 @@ const S = {
     statusError: "フォーセットのサーバーにつながりませんでした。ページを再読み込みしてください。",
     claimsLeft: (n) => `あと約 ${n} 回分あります`,
     claimsTotal: (n) => `合計 ${n} 件`,
-    burned: (amt) => `このフォーセットで燃えた ZAP：${amt} ZAP`,
-    burnPerClaimNote: (amt) => `1回の受け取りごとに ${amt} ZAP がバーンされます`,
-    burnAddrLabel: "バーンアドレス",
     claimsEmpty: "まだ受け取った人はいません。",
     claimsError: "一覧を読み込めませんでした。",
     addrLabel: (name) => `あなたの ${name} アドレス（0x…）`,
@@ -188,10 +182,9 @@ function paintChainTabs() {
 }
 
 // Subtitle per (chain x token): gas-relief copy for the native
-// tokens, plain factual copy for ZAP (ZAP is not gas money). The
-// per-claim burn is stated once, in the burn info area (paintBurn),
-// not repeated here. amountStr is display-formatted; a default is
-// used until /status answers with the live value.
+// tokens, plain factual copy for ZAP (ZAP is not gas money).
+// amountStr is display-formatted; a default is used until /status
+// answers with the live value.
 function paintSub(amountStr) {
   if (isZap()) {
     $("subText").innerHTML = S.subZap(amountStr || "1");
@@ -221,9 +214,9 @@ function defaultAmountDisplay() {
 }
 
 // Prominent stock line: the faucet's balance of the selected token
-// plus the remaining claim count (the Worker's claimsLeft already
-// divides by the full per-claim cost, 1.5 ZAP for ZAP). Hidden while
-// the faucet is not_ready — the balance is unknown then.
+// plus the remaining claim count (one claim costs one claim amount
+// of the token). Hidden while the faucet is not_ready — the balance
+// is unknown then.
 function paintStock(st) {
   const el = $("stockLine");
   if (!el) return;
@@ -249,48 +242,6 @@ function paintTokenSwitch() {
   $("tokenBtnZap").classList.toggle("active", currentToken === "zap");
 }
 
-// ZAP burn info (ZAP view only), two lines:
-//  1. The per-claim burn, stated plainly — the amount is the
-//     Worker's burnPerClaim from /status, never hardcoded here.
-//  2. The cumulative total burned through this faucet (a counter
-//     kept by the Worker, starting at 0) — not everything ever
-//     sent to the burn address. The burn address itself is linked
-//     so the burns can be checked on-chain.
-// Each line appears only when its value is present in /status.
-function paintBurn(st) {
-  const el = $("burnInfo");
-  if (!el) return;
-  el.textContent = "";
-  if (!st || st.token !== "zap") {
-    el.hidden = true;
-    return;
-  }
-  let shown = false;
-  if (st.burnPerClaim != null) {
-    const line = document.createElement("div");
-    line.textContent = S.burnPerClaimNote(fmtDisplay(st.burnPerClaim));
-    el.appendChild(line);
-    shown = true;
-  }
-  if (st.burnedTotal != null && st.burnAddress) {
-    const line = document.createElement("div");
-    const open = LANG === "ja" ? "（" : " (";
-    const close = LANG === "ja" ? "）" : ")";
-    line.appendChild(document.createTextNode(S.burned(fmtDisplay(st.burnedTotal)) + open));
-    const a = document.createElement("a");
-    a.href = CHAINS["42"].explorer + "/address/" + st.burnAddress;
-    a.target = "_blank";
-    a.rel = "noopener";
-    a.textContent =
-      S.burnAddrLabel + " " + st.burnAddress.slice(0, 6) + "…" + st.burnAddress.slice(-4);
-    line.appendChild(a);
-    line.appendChild(document.createTextNode(close));
-    el.appendChild(line);
-    shown = true;
-  }
-  el.hidden = !shown;
-}
-
 async function loadStatus() {
   const chain = currentChain;
   const token = effToken();
@@ -307,7 +258,6 @@ async function loadStatus() {
     if (chain !== currentChain || token !== effToken()) return null;
     statusEl.textContent = S.statusError;
     paintStock(null);
-    paintBurn(null);
     claimBtn.disabled = true;
     return null;
   }
@@ -324,7 +274,6 @@ async function loadStatus() {
     $("claimsLeft").textContent = "";
     $("faucetAddr").textContent = "—";
     paintStock(null);
-    paintBurn(null);
     claimBtn.disabled = true;
     return null;
   }
@@ -338,7 +287,6 @@ async function loadStatus() {
       $("claimsLeft").textContent = "";
       $("faucetAddr").textContent = "—";
       paintStock(null);
-      paintBurn(st);
       claimBtn.disabled = true;
       return st;
     }
@@ -347,7 +295,6 @@ async function loadStatus() {
     $("claimsLeft").textContent =
       typeof st.claimsLeft === "number" ? S.claimsLeft(st.claimsLeft) : "";
     paintStock(st);
-    paintBurn(st);
     if (!st.ready) {
       statusEl.textContent = S.faucetLow(fmtDisplay(st.balance), sym());
       claimBtn.disabled = true;
