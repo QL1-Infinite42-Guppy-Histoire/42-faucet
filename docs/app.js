@@ -33,11 +33,12 @@ const S = {
     claimsLeft: (n) => `About ${n} claims left`,
     claimsTotal: (n) => `Total: ${n} claim${n === 1 ? "" : "s"} so far`,
     burned: (amt) => `ZAP burned by this faucet: ${amt} ZAP`,
+    burnPerClaimNote: (amt) => `${amt} ZAP is burned with every claim.`,
     burnAddrLabel: "burn address",
     claimsEmpty: "No one has claimed yet.",
     claimsError: "Could not load the list.",
     addrLabel: (name) => `Your ${name} address (0x…)`,
-    subZap: (amount, burn) => `Claim ${amount} ZAP. Each claim also burns ${burn} ZAP.`,
+    subZap: (amount) => `Claim ${amount} ZAP.`,
     gateNote: (amount, sym) =>
       `Only addresses holding <b>less than ${amount} ${sym}</b> can claim. This faucet is for gas relief, not a giveaway for funded wallets.`,
     gateNoteZap: "You can claim ZAP even if you already hold some.",
@@ -70,11 +71,12 @@ const S = {
     claimsLeft: (n) => `あと約 ${n} 回分あります`,
     claimsTotal: (n) => `合計 ${n} 件`,
     burned: (amt) => `このフォーセットで燃えた ZAP：${amt} ZAP`,
+    burnPerClaimNote: (amt) => `1回の受け取りごとに ${amt} ZAP がバーンされます`,
     burnAddrLabel: "バーンアドレス",
     claimsEmpty: "まだ受け取った人はいません。",
     claimsError: "一覧を読み込めませんでした。",
     addrLabel: (name) => `あなたの ${name} アドレス（0x…）`,
-    subZap: (amount, burn) => `ZAP を ${amount} 枚受け取れます。受け取るたびに ${burn} ZAP がバーンされます。`,
+    subZap: (amount) => `ZAP を ${amount} 枚受け取れます。`,
     gateNote: (amount, sym) =>
       `もらえるのは残高が <b>${amount} ${sym} 未満</b> のアドレスだけです。これはガス代救済用で、お金のあるウォレットへの配布ではありません。`,
     gateNoteZap: "ZAP は、すでに持っているアドレスでも受け取れます。",
@@ -186,12 +188,13 @@ function paintChainTabs() {
 }
 
 // Subtitle per (chain x token): gas-relief copy for the native
-// tokens, plain factual copy for ZAP (ZAP is not gas money).
-// amountStr / burnStr are display-formatted; defaults are used until
-// /status answers with the live values.
-function paintSub(amountStr, burnStr) {
+// tokens, plain factual copy for ZAP (ZAP is not gas money). The
+// per-claim burn is stated once, in the burn info area (paintBurn),
+// not repeated here. amountStr is display-formatted; a default is
+// used until /status answers with the live value.
+function paintSub(amountStr) {
   if (isZap()) {
-    $("subText").innerHTML = S.subZap(amountStr || "1", burnStr || "0.5");
+    $("subText").innerHTML = S.subZap(amountStr || "1");
   } else {
     $("subText").innerHTML = S.sub(CHAINS[currentChain].name, sym());
   }
@@ -246,31 +249,46 @@ function paintTokenSwitch() {
   $("tokenBtnZap").classList.toggle("active", currentToken === "zap");
 }
 
-// Cumulative ZAP burn (ZAP view only): the total counts only the
-// ZAP burned through this faucet (a counter kept by the Worker,
-// starting at 0) — not everything ever sent to the burn address.
-// The burn address itself is linked so the burns can be checked
-// on-chain.
+// ZAP burn info (ZAP view only), two lines:
+//  1. The per-claim burn, stated plainly — the amount is the
+//     Worker's burnPerClaim from /status, never hardcoded here.
+//  2. The cumulative total burned through this faucet (a counter
+//     kept by the Worker, starting at 0) — not everything ever
+//     sent to the burn address. The burn address itself is linked
+//     so the burns can be checked on-chain.
+// Each line appears only when its value is present in /status.
 function paintBurn(st) {
   const el = $("burnInfo");
   if (!el) return;
   el.textContent = "";
-  if (!st || st.token !== "zap" || st.burnedTotal == null || !st.burnAddress) {
+  if (!st || st.token !== "zap") {
     el.hidden = true;
     return;
   }
-  el.hidden = false;
-  const open = LANG === "ja" ? "（" : " (";
-  const close = LANG === "ja" ? "）" : ")";
-  el.appendChild(document.createTextNode(S.burned(fmtDisplay(st.burnedTotal)) + open));
-  const a = document.createElement("a");
-  a.href = CHAINS["42"].explorer + "/address/" + st.burnAddress;
-  a.target = "_blank";
-  a.rel = "noopener";
-  a.textContent =
-    S.burnAddrLabel + " " + st.burnAddress.slice(0, 6) + "…" + st.burnAddress.slice(-4);
-  el.appendChild(a);
-  el.appendChild(document.createTextNode(close));
+  let shown = false;
+  if (st.burnPerClaim != null) {
+    const line = document.createElement("div");
+    line.textContent = S.burnPerClaimNote(fmtDisplay(st.burnPerClaim));
+    el.appendChild(line);
+    shown = true;
+  }
+  if (st.burnedTotal != null && st.burnAddress) {
+    const line = document.createElement("div");
+    const open = LANG === "ja" ? "（" : " (";
+    const close = LANG === "ja" ? "）" : ")";
+    line.appendChild(document.createTextNode(S.burned(fmtDisplay(st.burnedTotal)) + open));
+    const a = document.createElement("a");
+    a.href = CHAINS["42"].explorer + "/address/" + st.burnAddress;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent =
+      S.burnAddrLabel + " " + st.burnAddress.slice(0, 6) + "…" + st.burnAddress.slice(-4);
+    line.appendChild(a);
+    line.appendChild(document.createTextNode(close));
+    el.appendChild(line);
+    shown = true;
+  }
+  el.hidden = !shown;
 }
 
 async function loadStatus() {
@@ -312,10 +330,7 @@ async function loadStatus() {
   }
   lastStatus = st;
     $("claimAmount").textContent = fmtDisplay(st.claimAmount) + " " + sym();
-    paintSub(
-      fmtDisplay(st.claimAmount),
-      st.burnPerClaim ? fmtDisplay(st.burnPerClaim) : null
-    );
+    paintSub(fmtDisplay(st.claimAmount));
     paintNotes(fmtDisplay(st.claimAmount));
     if (st.reason === "not_ready" || (!st.ready && !st.faucetAddress)) {
       statusEl.textContent = S.notReady;
