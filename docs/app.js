@@ -113,6 +113,21 @@ try {
   if (saved && TOKENS_42[saved]) currentToken = saved;
 } catch (e) { /* storage unavailable: default native */ }
 
+// Sanitize an impossible stored combination (chain=ql1 with
+// token=zap left over from a 42 Chain visit): the token switch only
+// exists on 42 Chain, and asking the QL1 worker for "zap" returns a
+// 400 with no claim amount. Correct the state and write the fix back.
+if (currentChain === "ql1" && currentToken !== "native") {
+  currentToken = "native";
+  try { localStorage.setItem("faucet42_token", "native"); } catch (e) { /* ignore */ }
+}
+
+// The token actually requested for the current selection: always
+// "native" on QL1, whatever the stored state says.
+function effToken() {
+  return currentChain === "ql1" ? "native" : currentToken;
+}
+
 function symFor(chain, token) {
   if (chain === "ql1") return CHAINS.ql1.symbol;
   return TOKENS_42[token] || TOKENS_42.native;
@@ -137,8 +152,10 @@ const addrInput = $("addrInput");
 let turnstileWidgetId = null;
 let lastStatus = null;
 
-// "10000000" -> "10,000,000"; "0.05" -> "0.05"; "12.5" -> "12.5"
+// "10000000" -> "10,000,000"; "0.05" -> "0.05"; "12.5" -> "12.5".
+// A missing value renders as a dash, never as "undefined"/"null".
 function fmtDisplay(numStr) {
+  if (numStr == null || numStr === "") return "—";
   const s = String(numStr);
   const dot = s.indexOf(".");
   const int = dot === -1 ? s : s.slice(0, dot);
@@ -258,16 +275,42 @@ function paintBurn(st) {
 
 async function loadStatus() {
   const chain = currentChain;
-  const token = currentToken;
+  const token = effToken();
   statusEl.textContent = S.loading;
   claimBtn.disabled = true;
+  let res;
   try {
-    const res = await fetch(
+    res = await fetch(
       CONFIG.WORKER_URL + "/status?chain=" + chain + "&token=" + token
     );
-    const st = await res.json();
-    if (chain !== currentChain || token !== currentToken) return null; // user switched meanwhile
-    lastStatus = st;
+  } catch (e) {
+    // A rejected fetch is a genuine network failure — the only case
+    // that earns the "could not reach the server" wording.
+    if (chain !== currentChain || token !== effToken()) return null;
+    statusEl.textContent = S.statusError;
+    paintStock(null);
+    paintBurn(null);
+    claimBtn.disabled = true;
+    return null;
+  }
+  const st = await res.json().catch(() => null);
+  if (chain !== currentChain || token !== effToken()) return null; // user switched meanwhile
+  if (!res.ok || !st || st.claimAmount == null) {
+    // The server answered, but with an HTTP error (e.g. 400) or a
+    // body without a claim amount. That is NOT a connection
+    // failure: show a plain retry message and dashes — never an
+    // "undefined" amount, never the network-error wording.
+    statusEl.textContent = S.err_generic;
+    $("claimAmount").textContent = "—";
+    $("faucetBalance").textContent = "—";
+    $("claimsLeft").textContent = "";
+    $("faucetAddr").textContent = "—";
+    paintStock(null);
+    paintBurn(null);
+    claimBtn.disabled = true;
+    return null;
+  }
+  lastStatus = st;
     $("claimAmount").textContent = fmtDisplay(st.claimAmount) + " " + sym();
     paintSub(
       fmtDisplay(st.claimAmount),
@@ -298,20 +341,19 @@ async function loadStatus() {
       claimBtn.disabled = false;
     }
     return st;
-  } catch (e) {
-    if (chain !== currentChain || token !== currentToken) return null;
-    statusEl.textContent = S.statusError;
-    paintStock(null);
-    paintBurn(null);
-    claimBtn.disabled = true;
-    return null;
-  }
 }
 
 function switchChain(chain) {
   if (!CHAINS[chain] || chain === currentChain) return;
   currentChain = chain;
   try { localStorage.setItem("faucet42_chain", chain); } catch (e) { /* ignore */ }
+  // The token switch exists only on 42 Chain: entering QL1 resets
+  // the token to the chain default, so a stale "zap" can never be
+  // sent to QL1 (which would answer 400 / no claim amount).
+  if (chain === "ql1" && currentToken !== "native") {
+    currentToken = "native";
+    try { localStorage.setItem("faucet42_token", "native"); } catch (e) { /* ignore */ }
+  }
   setResult("", false);
   resultEl.className = "result";
   paintChainTabs();
@@ -339,7 +381,7 @@ $("tokenBtnZap").addEventListener("click", () => switchToken("zap"));
 // ---- public recipients list (per chain x token) ----
 async function loadClaims() {
   const chain = currentChain;
-  const token = currentToken;
+  const token = effToken();
   const totalEl = $("claimsTotal");
   const listEl = $("claimsList");
   if (!totalEl || !listEl) return;
@@ -347,8 +389,9 @@ async function loadClaims() {
     const res = await fetch(
       CONFIG.WORKER_URL + "/claims?chain=" + chain + "&token=" + token
     );
-    const data = await res.json();
-    if (chain !== currentChain || token !== currentToken) return; // switched meanwhile
+    const data = await res.json().catch(() => null);
+    if (chain !== currentChain || token !== effToken()) return; // switched meanwhile
+    if (!res.ok || !data) throw new Error("claims request failed");
     totalEl.textContent = S.claimsTotal(data.total || 0);
     listEl.textContent = "";
     const items = Array.isArray(data.items) ? data.items : [];
@@ -390,7 +433,7 @@ async function loadClaims() {
       listEl.appendChild(row);
     }
   } catch (e) {
-    if (chain !== currentChain || token !== currentToken) return;
+    if (chain !== currentChain || token !== effToken()) return;
     totalEl.textContent = "";
     listEl.textContent = "";
     const p = document.createElement("p");
@@ -463,7 +506,7 @@ async function claim() {
     }
   }
   const chain = currentChain;
-  const ftoken = currentToken;
+  const ftoken = effToken();
   claimBtn.disabled = true;
   setResult(S.sending, false);
   try {
