@@ -11,8 +11,12 @@
 // transfer right after the claim transfer), so one ZAP claim consumes
 // 1.5 ZAP of stock. If only the burn transfer fails, the claim still
 // counts (the claim transfer cannot be rolled back) and the failure
-// is logged. The cumulative burned total shown by /status is read
-// on-chain as the burn address's ZAP balanceOf — never estimated.
+// is logged. The cumulative burned total shown by /status counts
+// ONLY burns executed by this faucet: a KV counter at "<chain>:
+// <token>:burned" (wei, decimal string) is incremented by the burn
+// amount whenever — and only when — a claim's burn transfer
+// succeeds. (The burn address's overall on-chain ZAP balance also
+// includes other people's burns and is NOT what is displayed.)
 //
 // Private keys are read ONLY from Worker secrets, one per chain:
 //   FAUCET_PRIVATE_KEY_42    for 42 Chain (both [42] and ZAP claims)
@@ -268,14 +272,20 @@ async function handleStatus(env, cfg, tok) {
   if (burn > 0n) {
     base.burnPerClaim = fmt(burn);
     base.burnAddress = BURN_ADDRESS;
-  }
-  // The cumulative burned total is public on-chain data (the burn
-  // address's balance of this token); include it whenever it can be
-  // read, even before the faucet key is set.
-  if (tok.contract) {
-    try {
-      base.burnedTotal = fmt(await getTokenBalance(cfg, tok, BURN_ADDRESS));
-    } catch (e) { /* omit burnedTotal when the read fails */ }
+    // Cumulative total burned BY THIS FAUCET ONLY, from its KV
+    // counter ("<chain>:<token>:burned", stored in wei). Starts at
+    // 0 and is incremented only when a claim's burn transfer
+    // succeeds (see handleClaim). The burn address's overall
+    // on-chain balance is deliberately not used here: it includes
+    // ZAP burned by others before/outside this faucet.
+    let burnedWei = 0n;
+    const kv = env.FAUCET_KV;
+    if (kv) {
+      try {
+        burnedWei = BigInt((await kv.get(cfg.id + ":" + tok.id + ":burned")) || "0");
+      } catch (e) { /* keep 0 when the counter cannot be read */ }
+    }
+    base.burnedTotal = fmt(burnedWei);
   }
   const wallet = getWallet(env, cfg);
   if (!wallet) return json({ ready: false, reason: "not_ready", ...base });
@@ -476,6 +486,29 @@ async function handleClaim(request, env) {
     }
   }
 
+  // Bump the faucet-only burned counter (the value /status returns
+  // as burnedTotal) — ONLY when the burn transfer actually
+  // succeeded, and only by that claim's burn amount. A failed burn
+  // adds nothing. The claim itself already stands either way, so a
+  // counter error here is logged, not fatal.
+  if (burnTxHash) {
+    try {
+      const prevBurned = BigInt((await kv.get(ns + "burned")) || "0");
+      await kv.put(ns + "burned", (prevBurned + burn).toString());
+    } catch (e) {
+      console.error(
+        "burn_counter_failed " +
+          JSON.stringify({
+            chain: cfg.id,
+            token: tok.id,
+            claimTx: txHash,
+            burnTx: burnTxHash,
+            error: String((e && e.message) || e),
+          })
+      );
+    }
+  }
+
   // Record the claim only after a successful broadcast.
   await kv.put(addrKey, String(now), { expirationTtl: ADDRESS_COOLDOWN_SEC });
   if (ip !== "unknown") {
@@ -487,7 +520,7 @@ async function handleClaim(request, env) {
   // plus one record per claim, keyed by zero-padded timestamp so a KV
   // prefix list comes back in chronological order (read newest-first
   // by /claims). The "claim:" prefix cannot collide with the limit
-  // keys ("addr:" / "ip:" / "day:" / "total").
+  // keys ("addr:" / "ip:" / "day:" / "total" / "burned").
   const prevTotal = Number((await kv.get(ns + "total")) || 0);
   await kv.put(ns + "total", String(prevTotal + 1));
   const recKey = ns + "claim:" + String(now).padStart(12, "0") + ":" + txHash;

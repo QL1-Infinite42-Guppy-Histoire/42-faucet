@@ -32,7 +32,7 @@ const S = {
     statusError: "Could not reach the faucet server. Please reload the page.",
     claimsLeft: (n) => `About ${n} claims left`,
     claimsTotal: (n) => `Total: ${n} claim${n === 1 ? "" : "s"} so far`,
-    burned: (amt) => `Burned so far: ${amt} ZAP`,
+    burned: (amt) => `ZAP burned by this faucet: ${amt} ZAP`,
     burnAddrLabel: "burn address",
     claimsEmpty: "No one has claimed yet.",
     claimsError: "Could not load the list.",
@@ -69,7 +69,7 @@ const S = {
     statusError: "フォーセットのサーバーにつながりませんでした。ページを再読み込みしてください。",
     claimsLeft: (n) => `あと約 ${n} 回分あります`,
     claimsTotal: (n) => `合計 ${n} 件`,
-    burned: (amt) => `今までに燃えた ZAP：${amt} ZAP`,
+    burned: (amt) => `このフォーセットで燃えた ZAP：${amt} ZAP`,
     burnAddrLabel: "バーンアドレス",
     claimsEmpty: "まだ受け取った人はいません。",
     claimsError: "一覧を読み込めませんでした。",
@@ -229,9 +229,11 @@ function paintTokenSwitch() {
   $("tokenBtnZap").classList.toggle("active", currentToken === "zap");
 }
 
-// Cumulative ZAP burn (ZAP view only): the total comes from the
-// Worker, which reads the burn address's on-chain ZAP balance. The
-// burn address itself is linked so anyone can verify the number.
+// Cumulative ZAP burn (ZAP view only): the total counts only the
+// ZAP burned through this faucet (a counter kept by the Worker,
+// starting at 0) — not everything ever sent to the burn address.
+// The burn address itself is linked so the burns can be checked
+// on-chain.
 function paintBurn(st) {
   const el = $("burnInfo");
   if (!el) return;

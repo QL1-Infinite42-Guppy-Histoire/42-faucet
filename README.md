@@ -17,7 +17,7 @@ A public faucet for 42 Chain mainnet and QL1. Newcomers whose wallets are almost
 
 ZAP は 42 Chain 上の ERC-20（コントラクト `0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B256`）で、42 Chain と同じ配布ウォレットから送ります。サイトの 42 Chain タブ内のチップ（[42] / ZAP）で切り替えます。ZAP は1回の受け取りごとに、受取人への 1 ZAP に加えて **0.5 ZAP をバーンアドレス `0x000000000000000000000000000000000000dEaD` へ送って燃やします**（1回あたりの消費は合計 1.5 ZAP）。累計燃焼量は、バーンアドレスの ZAP 残高（オンチェーンの実数）をサイトに表示します。[42] と QOM の配布に燃焼はありません。
 
-ZAP is an ERC-20 on 42 Chain (contract `0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B256`), sent from the same 42 Chain faucet wallet. Switch between [42] and ZAP with the chips in the 42 Chain tab. Each ZAP claim also **burns 0.5 ZAP** to `0x000000000000000000000000000000000000dEaD` (1.5 ZAP consumed per claim in total). The site shows the cumulative burned total as the burn address's on-chain ZAP balance. [42] and QOM claims have no burn.
+ZAP is an ERC-20 on 42 Chain (contract `0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B256`), sent from the same 42 Chain faucet wallet. Switch between [42] and ZAP with the chips in the 42 Chain tab. Each ZAP claim also **burns 0.5 ZAP** to `0x000000000000000000000000000000000000dEaD` (1.5 ZAP consumed per claim in total). The site shows the cumulative total burned **through this faucet** (a counter kept by the Worker, incremented only when a claim's burn transfer succeeds; ZAP burned by others to the same address is not included). [42] and QOM claims have no burn.
 
 ## ルール / Rules
 
@@ -95,7 +95,7 @@ Note: after redeploying, verify in the dashboard that the secrets are still pres
 ## 開発メモ / Development notes
 
 - RPC: 42 Chain は `https://evm-rpc.infinitepanda.xyz`（主）→ `https://evm-rpc-infinite.mschihuahua.org`（予備）、QL1 は `https://evm-rpc-ql1.mschihuahua.org`。
-- ネイティブ配布は EVM ネイティブ送金（21,000 gas、legacy 形式、ガス価格は `eth_gasPrice`）。ZAP は ERC-20 `transfer`（ガス量は `eth_estimateGas`、失敗時は 65,000 にフォールバック）。ZAP の燃焼は配布直後の2本目の `transfer`（バーンアドレス宛て）で、燃焼だけ失敗しても claim は成立扱いにして Worker ログに `burn_failed` として残します。`GET /status?token=zap` の `burnedTotal` はバーンアドレスの ZAP `balanceOf` を都度読んだオンチェーン実数です。
+- ネイティブ配布は EVM ネイティブ送金（21,000 gas、legacy 形式、ガス価格は `eth_gasPrice`）。ZAP は ERC-20 `transfer`（ガス量は `eth_estimateGas`、失敗時は 65,000 にフォールバック）。ZAP の燃焼は配布直後の2本目の `transfer`（バーンアドレス宛て）で、燃焼だけ失敗しても claim は成立扱いにして Worker ログに `burn_failed` として残します。`GET /status?token=zap` の `burnedTotal` は、このフォーセット経由で燃えた ZAP の累計です（Worker の KV カウンタ `42:zap:burned` に wei で保持し、バーン送金が成功した時だけその回の燃焼量を加算します。他者が同じバーンアドレスに燃やした分は含みません）。
 - Worker の API: `GET /status?chain=42|ql1[&token=native|zap]`、`GET /claims?chain=42|ql1[&token=native|zap]`、`POST /claim`（`token` 省略時は `native`。`zap` は 42 Chain のみ、QL1 では `qom` も native の別名）。
 - エクスプローラー: 42 Chain は https://scan.infinitedrive.xyz、QL1 は https://scan.qom.network。
 
