@@ -1,1 +1,2 @@
-[{"name":"FAUCET_KV","namespace_id":"637a51a060534b33a099ace39a63d8ba","type":"kv_namespace"},{"name":"CLAIM_AMOUNT_42","text":"0.05","type":"plain_text"},{"name":"CLAIM_AMOUNT_ZAP","text":"1","type":"plain_text"},{"name":"CLAIM_AMOUNT_QOM","text":"10000000","type":"plain_text"}]
+[{"name":"FAUCET_KV","namespace_id":"637a51a060534b33a099ace39a63d8ba","type":"kv_namespace"},{"name":"CLAIM_AMOUNT_42","text":"0.05","type":"plain_text"},{"name":"CLAIM_AMOUNT_ZAP","text":"1","type":"plain_text"},
+{"name":"CLAIM_BURN_ZAP","text":"0.5","type":"plain_text"},{"name":"CLAIM_AMOUNT_QOM","text":"10000000","type":"plain_text"}]

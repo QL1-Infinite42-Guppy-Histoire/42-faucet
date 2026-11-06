@@ -15,9 +15,9 @@ A public faucet for 42 Chain mainnet and QL1. Newcomers whose wallets are almost
 | 42 Chain（ZAP トークン / ZAP token） | 421018 | 1 ZAP |
 | QL1 | 766 | 10,000,000 QOM |
 
-ZAP は 42 Chain 上の ERC-20（コントラクト `0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B256`）で、42 Chain と同じ配布ウォレットから送ります。サイトの 42 Chain タブ内のチップ（[42] / ZAP）で切り替えます。
+ZAP は 42 Chain 上の ERC-20（コントラクト `0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B256`）で、42 Chain と同じ配布ウォレットから送ります。サイトの 42 Chain タブ内のチップ（[42] / ZAP）で切り替えます。ZAP は1回の受け取りごとに、受取人への 1 ZAP に加えて **0.5 ZAP をバーンアドレス `0x000000000000000000000000000000000000dEaD` へ送って燃やします**（1回あたりの消費は合計 1.5 ZAP）。累計燃焼量は、バーンアドレスの ZAP 残高（オンチェーンの実数）をサイトに表示します。[42] と QOM の配布に燃焼はありません。
 
-ZAP is an ERC-20 on 42 Chain (contract `0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B256`), sent from the same 42 Chain faucet wallet. Switch between [42] and ZAP with the chips in the 42 Chain tab.
+ZAP is an ERC-20 on 42 Chain (contract `0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B256`), sent from the same 42 Chain faucet wallet. Switch between [42] and ZAP with the chips in the 42 Chain tab. Each ZAP claim also **burns 0.5 ZAP** to `0x000000000000000000000000000000000000dEaD` (1.5 ZAP consumed per claim in total). The site shows the cumulative burned total as the burn address's on-chain ZAP balance. [42] and QOM claims have no burn.
 
 ## ルール / Rules
 
@@ -27,7 +27,7 @@ ZAP is an ERC-20 on 42 Chain (contract `0x89195Ca5C954b6f99b78f4A2Aa5435A75Dc5B2
 - 同じ回線（IP）は24時間に1回まで / 1 claim per IP every 24 hours
 - そのトークンの残高が「1回分以上」あるアドレスには配りません（[42]: 0.05 以上、ZAP: 1 ZAP 以上、QOM: 10,000,000 QOM 以上は不可。判定は対象トークンの残高だけです）/ Addresses already holding at least one claim amount of that token cannot claim (only that token's balance counts)
 - 組み合わせごとに1日100回まで / 100 claims per day per (chain × token)
-- フォーセットのそのトークンの残高が「配布額×5」未満になると自動で配布停止 / Distribution pauses when the faucet's balance of that token drops below 5 claims' worth
+- フォーセットのそのトークンの残高が「1回分の消費×5」未満になると自動で配布停止（ZAP は 1.5 ZAP × 5 = 7.5 ZAP 未満で停止）/ Distribution pauses when the faucet's balance of that token drops below 5 claims' worth (for ZAP, one claim's cost is 1.5 ZAP including the burn)
 
 ## 仕組み / How it works
 
@@ -47,7 +47,7 @@ Do this per chain. **Never paste a private key into chat or GitHub** — the onl
 ### 42 Chain
 
 1. 配布専用の新しいウォレットを作ります（普段使いのウォレットとは分ける）。
-2. そのアドレスに [42] と ZAP を入金します（例：50 [42] と 100 ZAP。配布 0.05 [42] × 約1,000回分／1 ZAP × 100回分）。[42] は ZAP 配布時のガス代にも使われるので、両方入れてください。
+2. そのアドレスに [42] と ZAP を入金します（例：50 [42] と 150 ZAP。配布 0.05 [42] × 約1,000回分／ZAP は配布 1 + 燃焼 0.5 = 1.5 ZAP × 100回分で、うち 50 ZAP が燃焼分）。[42] は ZAP 配布時のガス代にも使われるので、両方入れてください。
 3. Cloudflare ダッシュボード → Workers & Pages → `42-faucet` → Settings → Variables and Secrets → Secret を追加：
    - 名前 / Name: `FAUCET_PRIVATE_KEY_42`
    - 値 / Value: 手順1のウォレットの秘密鍵
@@ -74,6 +74,7 @@ Worker の環境変数で変えられます（Cloudflare ダッシュボード �
 
 - `CLAIM_AMOUNT_42`（デフォルト `0.05`）
 - `CLAIM_AMOUNT_ZAP`（デフォルト `1`）
+- `CLAIM_BURN_ZAP`（デフォルト `0.5`、ZAP 1回の受け取りごとに燃やす量）
 - `CLAIM_AMOUNT_QOM`（デフォルト `10000000`）
 
 ## 再デプロイ / Redeploying the worker
@@ -94,7 +95,7 @@ Note: after redeploying, verify in the dashboard that the secrets are still pres
 ## 開発メモ / Development notes
 
 - RPC: 42 Chain は `https://evm-rpc.infinitepanda.xyz`（主）→ `https://evm-rpc-infinite.mschihuahua.org`（予備）、QL1 は `https://evm-rpc-ql1.mschihuahua.org`。
-- ネイティブ配布は EVM ネイティブ送金（21,000 gas、legacy 形式、ガス価格は `eth_gasPrice`）。ZAP は ERC-20 `transfer`（ガス量は `eth_estimateGas`、失敗時は 65,000 にフォールバック）。
+- ネイティブ配布は EVM ネイティブ送金（21,000 gas、legacy 形式、ガス価格は `eth_gasPrice`）。ZAP は ERC-20 `transfer`（ガス量は `eth_estimateGas`、失敗時は 65,000 にフォールバック）。ZAP の燃焼は配布直後の2本目の `transfer`（バーンアドレス宛て）で、燃焼だけ失敗しても claim は成立扱いにして Worker ログに `burn_failed` として残します。`GET /status?token=zap` の `burnedTotal` はバーンアドレスの ZAP `balanceOf` を都度読んだオンチェーン実数です。
 - Worker の API: `GET /status?chain=42|ql1[&token=native|zap]`、`GET /claims?chain=42|ql1[&token=native|zap]`、`POST /claim`（`token` 省略時は `native`。`zap` は 42 Chain のみ、QL1 では `qom` も native の別名）。
 - エクスプローラー: 42 Chain は https://scan.infinitedrive.xyz、QL1 は https://scan.qom.network。
 
