@@ -1,6 +1,6 @@
 # 42 Chain & QL1 フォーセット / 42 Chain & QL1 Faucet
 
-42 Chain メインネットと QL1 の公開フォーセットです。ウォレットの残高がほぼ無い新規ユーザーが、ガス代の足しになる小額のネイティブトークンを無料でもらえます。
+42 Chain メインネットと QL1 の公開フォーセットです。ウォレットの残高がほぼ無い人が、ガス代の足しになる小額のネイティブトークンを無料でもらえます。
 
 A public faucet for 42 Chain mainnet and QL1. Newcomers whose wallets are almost empty can claim a small amount of the native token for gas.
 
