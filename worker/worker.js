@@ -3,7 +3,7 @@
 // Gives a small amount of the chain's native token to addresses that
 // hold less than one claim amount, so newcomers can pay gas:
 //   - 42 Chain (EVM 421018): [42],  default claim 0.05 [42]
-//   - QL1      (EVM 766):    QOM,   default claim 5,000,000 QOM
+//   - QL1      (EVM 766):    QOM,   default claim 10,000,000 QOM
 //
 // Private keys are read ONLY from Worker secrets, one per chain:
 //   FAUCET_PRIVATE_KEY_42    for 42 Chain
@@ -15,7 +15,7 @@
 // Bindings / variables:
 //   FAUCET_KV           (KV namespace binding, required: rate limits)
 //   CLAIM_AMOUNT_42     (plain variable, optional, default "0.05")
-//   CLAIM_AMOUNT_QOM    (plain variable, optional, default "5000000")
+//   CLAIM_AMOUNT_QOM    (plain variable, optional, default "10000000")
 //   TURNSTILE_SECRET    (secret, optional: enables Turnstile checks)
 //
 // Abuse limits, applied independently per chain (KV keys are
@@ -51,7 +51,7 @@ const CHAINS = {
     explorerTx: "https://scan.qom.network/tx/",
     keyEnv: "FAUCET_PRIVATE_KEY_QL1",
     amountEnv: "CLAIM_AMOUNT_QOM",
-    defaultAmount: "5000000",
+    defaultAmount: "10000000",
   },
 };
 
@@ -79,7 +79,7 @@ function chainOf(v) {
   return CHAINS[String(v || "42").toLowerCase()] || null;
 }
 
-// Decimal string for a wei value ("0.0500" -> "0.05", "5000000.0" -> "5000000").
+// Decimal string for a wei value ("0.0500" -> "0.05", "10000000.0" -> "10000000").
 function fmt(wei) {
   const s = ethers.formatEther(wei);
   if (!s.includes(".")) return s;

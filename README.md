@@ -12,7 +12,7 @@ A public faucet for 42 Chain mainnet and QL1. Newcomers whose wallets are almost
 | チェーン / Chain | EVM chain ID | もらえる量（デフォルト）/ Claim amount (default) |
 |---|---|---|
 | 42 Chain | 421018 | 0.05 [42] |
-| QL1 | 766 | 5,000,000 QOM |
+| QL1 | 766 | 10,000,000 QOM |
 
 ## ルール / Rules
 
@@ -20,7 +20,7 @@ A public faucet for 42 Chain mainnet and QL1. Newcomers whose wallets are almost
 
 - 同じアドレスは7日に1回まで / 1 claim per address every 7 days
 - 同じ回線（IP）は24時間に1回まで / 1 claim per IP every 24 hours
-- 残高が「1回分以上」あるアドレスには配りません（42 Chain: 0.05 [42] 以上、QL1: 5,000,000 QOM 以上は不可）/ Addresses already holding at least one claim amount cannot claim
+- 残高が「1回分以上」あるアドレスには配りません（42 Chain: 0.05 [42] 以上、QL1: 10,000,000 QOM 以上は不可）/ Addresses already holding at least one claim amount cannot claim
 - チェーンごとに1日100回まで / 100 claims per day per chain
 - フォーセットの残高が「配布額×5」未満になると自動で配布停止 / Distribution pauses when the faucet balance drops below 5 claims' worth
 
@@ -50,7 +50,7 @@ Do this per chain. **Never paste a private key into chat or GitHub** — the onl
 ### QL1
 
 1. 配布専用の新しいウォレットを作ります（42 Chain 用とは別のもの）。
-2. そのアドレスに QOM を入金します（例：500,000,000 QOM。配布 5,000,000 QOM × 100回分）。QL1 のガス代は高い（フロア 18 QOM/gas、1送金 21,000 gas で約378,000 QOM）ので、ガス分も含めて少し多めに入れてください。
+2. そのアドレスに QOM を入金します（例：1,000,000,000 QOM。配布 10,000,000 QOM × 100回分）。QL1 のガス代は高い（フロア 18 QOM/gas、1送金 21,000 gas で約378,000 QOM）ので、ガス分も含めて少し多めに入れてください。
 3. Cloudflare ダッシュボード → Workers & Pages → `42-faucet` → Settings → Variables and Secrets → Secret を追加：
    - 名前 / Name: `FAUCET_PRIVATE_KEY_QL1`
    - 値 / Value: 手順1のウォレットの秘密鍵
@@ -67,7 +67,7 @@ Do this per chain. **Never paste a private key into chat or GitHub** — the onl
 Worker の環境変数で変えられます（Cloudflare ダッシュボード → `42-faucet` → Settings → Variables and Secrets）:
 
 - `CLAIM_AMOUNT_42`（デフォルト `0.05`）
-- `CLAIM_AMOUNT_QOM`（デフォルト `5000000`）
+- `CLAIM_AMOUNT_QOM`（デフォルト `10000000`）
 
 ## 再デプロイ / Redeploying the worker
 

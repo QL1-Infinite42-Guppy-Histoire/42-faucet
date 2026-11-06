@@ -101,7 +101,7 @@ const addrInput = $("addrInput");
 let turnstileWidgetId = null;
 let lastStatus = null;
 
-// "5000000" -> "5,000,000"; "0.05" -> "0.05"; "12.5" -> "12.5"
+// "10000000" -> "10,000,000"; "0.05" -> "0.05"; "12.5" -> "12.5"
 function fmtDisplay(numStr) {
   const s = String(numStr);
   const dot = s.indexOf(".");
