@@ -5,17 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>42 Chain &amp; QL1 Faucet — free gas money</title>
 <meta name="description" content="A public faucet for 42 Chain mainnet and QL1. If your wallet is almost empty, claim a small amount of the native token for gas.">
+<script>(function(){try{document.documentElement.dataset.theme=localStorage.getItem("guppy-theme")==="dark"?"dark":"light";}catch(e){document.documentElement.dataset.theme="light";}})();</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <span class="lang-switch"><label>Language / 言語 <select id="langSel"><option value="en" selected>English</option><option value="ja">日本語</option></select></label></span>
+  <span class="lang-switch"><label>Language / 言語 <select id="langSel"><option value="en" selected>English</option><option value="ja">日本語</option></select></label></span><button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle background theme"></button>
   <h1>42 Chain &amp; QL1 Faucet</h1>
   <p class="sub" id="subText">Loading…</p>
   <p id="status" class="status">Loading…</p>
 </header>
 
-<section class="panel">
+<main class="layout">
+<section class="panel panel-claim">
   <div class="chain-switch" role="tablist" aria-label="Chain">
     <button type="button" id="chainBtn42" class="chain-btn" data-chain="42">42 Chain</button>
     <button type="button" id="chainBtnQl1" class="chain-btn" data-chain="ql1">QL1</button>
@@ -54,13 +56,13 @@
   </div>
 </section>
 
-<section class="panel">
+<section class="panel panel-claims">
   <h2>Who has claimed</h2>
   <p class="claims-total" id="claimsTotal"></p>
   <div id="claimsList"></div>
 </section>
 
-<section class="panel">
+<section class="panel panel-rules">
   <h2>Rules &amp; notes</h2>
   <ul class="notes">
     <li>One claim per address every <b>7 days</b>, and one claim per network (IP address) every <b>24 hours</b> — counted separately for each chain and token.</li>
@@ -70,11 +72,22 @@
     <li id="smallNote">Amounts are small on purpose: just enough to make a few transactions. Please don't drain it with many wallets.</li>
   </ul>
 </section>
+</main>
 
 <footer>
   <p>For 42 Chain (EVM chain ID 421018) and QL1 (EVM chain ID 766). Source: <a href="https://github.com/QL1-Infinite42-Guppy-Histoire/42-faucet">GitHub</a> (MIT). Not affiliated with the chain operators.</p>
 </footer>
 
 <script src="app.js?v=4"></script>
+<script>
+(function(){
+  var btn=document.getElementById("themeToggle");
+  if(!btn)return;
+  var ja=(document.documentElement.lang||"").indexOf("ja")===0;
+  function label(){var d=document.documentElement.dataset.theme==="dark";btn.textContent=d?(ja?"\u2600\uFE0F \u767D\u80CC\u666F":"\u2600\uFE0F Light"):(ja?"\uD83C\uDF19 \u9ED2\u80CC\u666F":"\uD83C\uDF19 Dark");}
+  label();
+  btn.addEventListener("click",function(){var next=document.documentElement.dataset.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=next;try{localStorage.setItem("guppy-theme",next);}catch(e){}label();});
+})();
+</script>
 </body>
 </html>
