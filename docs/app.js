@@ -341,6 +341,9 @@ $("tokenBtnNative").addEventListener("click", () => switchToken("native"));
 $("tokenBtnZap").addEventListener("click", () => switchToken("zap"));
 
 // ---- public recipients list (per chain x token) ----
+// Only the 6 most recent recipients are shown (the API returns the
+// full list newest-first; the slice happens here at render time).
+const CLAIMS_SHOW_MAX = 6;
 async function loadClaims() {
   const chain = currentChain;
   const token = effToken();
@@ -365,7 +368,7 @@ async function loadClaims() {
       return;
     }
     const sym = symFor(chain, token);
-    for (const it of items) {
+    for (const it of items.slice(0, CLAIMS_SHOW_MAX)) {
       const row = document.createElement("div");
       row.className = "claim-item";
       const a = document.createElement("a");
