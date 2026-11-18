@@ -398,30 +398,50 @@ async function handleClaim(request, env) {
   }
 
   // Record the claim only after a successful broadcast.
-  await kv.put(addrKey, String(now), { expirationTtl: ADDRESS_COOLDOWN_SEC });
-  if (ip !== "unknown") {
-    await kv.put(ipKey, String(now), { expirationTtl: IP_COOLDOWN_SEC });
+  // BEST-EFFORT (2026-11-17 incident): the transfer is already on-chain
+  // at this point, so a KV failure (e.g. the account-wide free daily
+  // write quota) must never turn a delivered claim into an error
+  // response. Limit keys and history are written in separate guarded
+  // blocks; failures are logged and the claim still returns ok:true.
+  // Trade-off, accepted: while KV writes are failing, the cooldown /
+  // daily-cap records for those claims are missing, so the limits do
+  // not bind until writes recover (quota resets 09:00 JST daily).
+  let recorded = true;
+  try {
+    await kv.put(addrKey, String(now), { expirationTtl: ADDRESS_COOLDOWN_SEC });
+    if (ip !== "unknown") {
+      await kv.put(ipKey, String(now), { expirationTtl: IP_COOLDOWN_SEC });
+    }
+    await kv.put(dayKey, String(dayCount + 1), { expirationTtl: DAY_KEY_TTL_SEC });
+  } catch (e) {
+    recorded = false;
+    console.log("faucet: limit-record KV write failed", String(e));
   }
-  await kv.put(dayKey, String(dayCount + 1), { expirationTtl: DAY_KEY_TTL_SEC });
 
   // Claim history for the public recipients list: a cumulative counter
   // plus one record per claim, keyed by zero-padded timestamp so a KV
   // prefix list comes back in chronological order (read newest-first
   // by /claims). The "claim:" prefix cannot collide with the limit
   // keys ("addr:" / "ip:" / "day:" / "total").
-  const prevTotal = Number((await kv.get(ns + "total")) || 0);
-  await kv.put(ns + "total", String(prevTotal + 1));
-  const recKey = ns + "claim:" + String(now).padStart(12, "0") + ":" + txHash;
-  await kv.put(
-    recKey,
-    JSON.stringify({ address, amount: fmt(amount), txHash, ts: now })
-  );
+  try {
+    const prevTotal = Number((await kv.get(ns + "total")) || 0);
+    await kv.put(ns + "total", String(prevTotal + 1));
+    const recKey = ns + "claim:" + String(now).padStart(12, "0") + ":" + txHash;
+    await kv.put(
+      recKey,
+      JSON.stringify({ address, amount: fmt(amount), txHash, ts: now })
+    );
+  } catch (e) {
+    recorded = false;
+    console.log("faucet: history KV write failed", String(e));
+  }
 
   return json({
     ok: true,
     txHash,
     amount: fmt(amount),
     explorerUrl: cfg.explorerTx + txHash,
+    recorded,
     ...meta,
   });
 }
