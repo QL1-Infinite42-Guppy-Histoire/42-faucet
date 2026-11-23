@@ -1,3 +1,5 @@
 node_modules/
 worker/node_modules/
 worker/dist/
+worker/*.bak-*
+worker/*.patch
