@@ -259,7 +259,21 @@ async function handleStatus(env, cfg, tok) {
   });
 }
 
+// Browser origins allowed to POST /claim. Browsers always send an
+// Origin header on POST, so a claim driven from any other website
+// (e.g. a page auto-submitting in a visitor's browser to drain the
+// faucet to the site owner's address, burning the visitor's IP
+// cooldown) is rejected. Requests with no Origin header (curl, API
+// clients) are unaffected.
+const CLAIM_ALLOWED_ORIGINS = new Set([
+  "https://ql1-infinite42-guppy-histoire.github.io",
+]);
+
 async function handleClaim(request, env) {
+  const origin = request.headers.get("Origin");
+  if (origin && !CLAIM_ALLOWED_ORIGINS.has(origin)) {
+    return json({ ok: false, code: "bad_origin" }, 403);
+  }
   let body;
   try {
     body = await request.json();

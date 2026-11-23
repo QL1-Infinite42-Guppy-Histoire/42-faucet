@@ -152,7 +152,10 @@ let lastStatus = null;
 // A missing value renders as a dash, never as "undefined"/"null".
 function fmtDisplay(numStr) {
   if (numStr == null || numStr === "") return "—";
-  const s = String(numStr);
+  // Amounts are rendered into innerHTML in places, so keep only the
+  // characters a decimal amount can contain (defence in depth against
+  // a malformed/compromised Worker response injecting markup).
+  const s = String(numStr).replace(/[^0-9.,-]/g, "");
   const dot = s.indexOf(".");
   const int = dot === -1 ? s : s.slice(0, dot);
   const rest = dot === -1 ? "" : s.slice(dot);
@@ -372,7 +375,11 @@ async function loadClaims() {
       const row = document.createElement("div");
       row.className = "claim-item";
       const a = document.createElement("a");
-      a.href = it.addressUrl;
+      // Only follow explorer URLs on the known chain explorer host;
+      // anything else (corrupt record) falls back to a locally built link.
+      a.href = /^https:\/\/scan\.(infinitedrive\.xyz|qom\.network)\//.test(String(it.addressUrl || ""))
+        ? it.addressUrl
+        : CHAINS[chain].explorer + "/address/" + it.address;
       a.target = "_blank";
       a.rel = "noopener";
       a.className = "mono";
@@ -385,7 +392,9 @@ async function loadClaims() {
       meta.appendChild(amt);
       meta.appendChild(document.createTextNode(" · "));
       const tx = document.createElement("a");
-      tx.href = it.txUrl;
+      tx.href = /^https:\/\/scan\.(infinitedrive\.xyz|qom\.network)\//.test(String(it.txUrl || ""))
+        ? it.txUrl
+        : CHAINS[chain].explorer + "/tx/" + it.txHash;
       tx.target = "_blank";
       tx.rel = "noopener";
       tx.textContent = "tx";
@@ -482,8 +491,15 @@ async function claim() {
     });
     const data = await res.json();
     if (data.ok) {
+      // Never interpolate a server-supplied URL/hash into innerHTML
+      // unchecked: rebuild the explorer link from the known chain
+      // explorer and a strictly validated tx hash.
+      const hash = /^0x[0-9a-fA-F]{64}$/.test(String(data.txHash || ""))
+        ? String(data.txHash)
+        : "";
+      const url = CHAINS[chain].explorer + "/tx/" + hash;
       setResult(
-        S.sent(fmtDisplay(data.amount), symFor(chain, ftoken), data.explorerUrl, data.txHash),
+        S.sent(fmtDisplay(data.amount), symFor(chain, ftoken), url, hash || "0x"),
         false
       );
     } else {
