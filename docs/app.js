@@ -1,6 +1,6 @@
 // 42 Chain & QL1 Faucet — shared frontend logic for en.html / ja.html.
 // The page language comes from <html lang>; all strings live below.
-// The chain ([42 Chain | QL1] tabs, like the GuppyWallet Home switch)
+// The chain ([42 Chain | QL1] tabs, like a wallet's Home chain switch)
 // is kept in localStorage and every number, balance and explorer link
 // follows the selected chain. On 42 Chain there is also a token switch
 // ([42] / ZAP chips); QL1 always serves its native QOM.
