@@ -31,6 +31,20 @@
 //   - distribution pauses when the faucet's balance of that token
 //     drops below 1 claim amount
 //
+// Cap enforcement uses pre-send reservations (see handleClaim): just
+// before broadcasting, a claim writes reservation keys ("rsv:addr:",
+// "rsv:ip:", one "rsvday:<date>:<address>" key) that the cap checks
+// also read, so a second claim racing the same address / IP / daily
+// slot is rejected while the first is still in flight instead of
+// passing the same read-only checks. A reservation is released when
+// the send fails, deleted once the claim is recorded, and expires on
+// its own (RESERVATION_TTL_SEC) if the worker dies mid-send. KV has
+// no compare-and-swap and is eventually consistent, so this is not a
+// hard atomic guarantee: it shrinks the race window from the whole
+// check-then-send duration (seconds) to the reservation write's
+// propagation; same-region traffic — the normal case — sees the
+// reservation immediately.
+//
 // Claim history, in the same KV under the same namespace (no key
 // collisions with the limit keys): every successful claim stores one
 // record at "<chain>:<token>:claim:<zero-padded ts>:<txHash>" and
@@ -102,6 +116,10 @@ const ADDRESS_COOLDOWN_SEC = 7 * 24 * 3600;
 const IP_COOLDOWN_SEC = 24 * 3600;
 const DAILY_LIMIT = 100;
 const DAY_KEY_TTL_SEC = 2 * 24 * 3600;
+// Pre-send reservation lifetime: long enough to cover the RPC checks
+// plus the broadcast (seconds), short enough that a reservation left
+// behind by a dead worker stops blocking within minutes.
+const RESERVATION_TTL_SEC = 180;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -321,8 +339,10 @@ async function handleClaim(request, env) {
   const now = Math.floor(Date.now() / 1000);
   const ns = cfg.id + ":" + tok.id + ":";
 
+  const addrLower = address.toLowerCase();
+
   // Same address: 1 claim per 7 days (per chain x token).
-  const addrKey = ns + "addr:" + address.toLowerCase();
+  const addrKey = ns + "addr:" + addrLower;
   const prevAddr = await kv.get(addrKey);
   if (prevAddr) {
     const nextAt = Number(prevAddr) + ADDRESS_COOLDOWN_SEC;
@@ -341,10 +361,32 @@ async function handleClaim(request, env) {
     }
   }
 
-  // Global daily cap (UTC day, per chain x token).
-  const dayKey = ns + "day:" + new Date().toISOString().slice(0, 10);
+  // In-flight reservations: a claim that has reserved its slots but
+  // not finished broadcasting yet blocks the same address / IP like a
+  // recorded claim, and counts toward the daily cap. Reservation
+  // values are their expiry unix time (for retryAfterSec).
+  const dayStr = new Date().toISOString().slice(0, 10);
+  const rsvAddrKey = ns + "rsv:addr:" + addrLower;
+  const rsvIpKey = ns + "rsv:ip:" + ip;
+  const rsvDayPrefix = ns + "rsvday:" + dayStr + ":";
+  const rsvDayKey = rsvDayPrefix + addrLower;
+  const rsvAddr = await kv.get(rsvAddrKey);
+  if (rsvAddr) {
+    return json({ ok: false, code: "address_cooldown", retryAfterSec: Math.max(1, Number(rsvAddr) - now), ...meta }, 429);
+  }
+  if (ip !== "unknown") {
+    const rsvIp = await kv.get(rsvIpKey);
+    if (rsvIp) {
+      return json({ ok: false, code: "ip_cooldown", retryAfterSec: Math.max(1, Number(rsvIp) - now), ...meta }, 429);
+    }
+  }
+
+  // Global daily cap (UTC day, per chain x token): recorded claims
+  // plus the claims currently holding a reservation.
+  const dayKey = ns + "day:" + dayStr;
   const dayCount = Number((await kv.get(dayKey)) || 0);
-  if (dayCount >= DAILY_LIMIT) {
+  const rsvDayCount = (await kv.list({ prefix: rsvDayPrefix, limit: 1000 })).keys.length;
+  if (dayCount + rsvDayCount >= DAILY_LIMIT) {
     return json({ ok: false, code: "daily_limit", ...meta }, 429);
   }
 
@@ -392,6 +434,68 @@ async function handleClaim(request, env) {
     return json({ ok: false, code: "faucet_low", balance: fmt(faucetTokenBalance), ...meta }, 503);
   }
 
+  // Reserve the claim BEFORE broadcasting. Every check so far was a
+  // read, so two claims racing for the same address / IP (or the last
+  // daily slot) could both pass and both send; the reservation turns
+  // this claim's slots into KV state that the checks above read. The
+  // state is re-read here because the RPC pre-checks took network
+  // time. FAIL-OPEN: if the reservation writes themselves fail (e.g.
+  // the account-wide KV write quota from the 2026-11-17 incident),
+  // the claim proceeds unreserved — the pre-reservation behaviour —
+  // rather than breaking the faucet; the balance checks above still
+  // protect the funds.
+  let reserved = false;
+  let dayCountAtReserve = dayCount;
+  {
+    const [curAddr, curIp, curRsvAddr, curRsvIp, curDayRaw, curRsvList] = await Promise.all([
+      kv.get(addrKey),
+      ip !== "unknown" ? kv.get(ipKey) : Promise.resolve(null),
+      kv.get(rsvAddrKey),
+      ip !== "unknown" ? kv.get(rsvIpKey) : Promise.resolve(null),
+      kv.get(dayKey),
+      kv.list({ prefix: rsvDayPrefix, limit: 1000 }),
+    ]);
+    if (curAddr && now < Number(curAddr) + ADDRESS_COOLDOWN_SEC) {
+      return json({ ok: false, code: "address_cooldown", retryAfterSec: Number(curAddr) + ADDRESS_COOLDOWN_SEC - now, ...meta }, 429);
+    }
+    if (curIp && now < Number(curIp) + IP_COOLDOWN_SEC) {
+      return json({ ok: false, code: "ip_cooldown", retryAfterSec: Number(curIp) + IP_COOLDOWN_SEC - now, ...meta }, 429);
+    }
+    if (curRsvAddr) {
+      return json({ ok: false, code: "address_cooldown", retryAfterSec: Math.max(1, Number(curRsvAddr) - now), ...meta }, 429);
+    }
+    if (curRsvIp) {
+      return json({ ok: false, code: "ip_cooldown", retryAfterSec: Math.max(1, Number(curRsvIp) - now), ...meta }, 429);
+    }
+    dayCountAtReserve = Number(curDayRaw || 0);
+    if (dayCountAtReserve + curRsvList.keys.length >= DAILY_LIMIT) {
+      return json({ ok: false, code: "daily_limit", ...meta }, 429);
+    }
+    try {
+      const exp = String(now + RESERVATION_TTL_SEC);
+      await kv.put(rsvAddrKey, exp, { expirationTtl: RESERVATION_TTL_SEC });
+      if (ip !== "unknown") {
+        await kv.put(rsvIpKey, exp, { expirationTtl: RESERVATION_TTL_SEC });
+      }
+      await kv.put(rsvDayKey, exp, { expirationTtl: RESERVATION_TTL_SEC });
+      reserved = true;
+    } catch (e) {
+      console.log("faucet: reservation KV write failed; proceeding unreserved", String(e));
+    }
+  }
+
+  // Best-effort reservation release; the TTL is the backstop, so a
+  // failed delete only extends the block by minutes, never forever.
+  const releaseReservation = async () => {
+    if (!reserved) return;
+    reserved = false;
+    try { await kv.delete(rsvAddrKey); } catch (e) { /* TTL backstop */ }
+    if (ip !== "unknown") {
+      try { await kv.delete(rsvIpKey); } catch (e) { /* TTL backstop */ }
+    }
+    try { await kv.delete(rsvDayKey); } catch (e) { /* TTL backstop */ }
+  };
+
   // Sign and broadcast the claim transfer: a plain native transfer
   // (21,000 gas) or an ERC-20 transfer() call.
   const txBase = tok.contract
@@ -408,6 +512,9 @@ async function handleClaim(request, env) {
     txHash = null;
   }
   if (!txHash) {
+    // Nothing was sent, so the reservation must not become a
+    // cooldown: release it and let the caller retry right away.
+    await releaseReservation();
     return json({ ok: false, code: "send_failed", ...meta }, 502);
   }
 
@@ -426,7 +533,7 @@ async function handleClaim(request, env) {
     if (ip !== "unknown") {
       await kv.put(ipKey, String(now), { expirationTtl: IP_COOLDOWN_SEC });
     }
-    await kv.put(dayKey, String(dayCount + 1), { expirationTtl: DAY_KEY_TTL_SEC });
+    await kv.put(dayKey, String(dayCountAtReserve + 1), { expirationTtl: DAY_KEY_TTL_SEC });
   } catch (e) {
     recorded = false;
     console.log("faucet: limit-record KV write failed", String(e));
@@ -449,6 +556,10 @@ async function handleClaim(request, env) {
     recorded = false;
     console.log("faucet: history KV write failed", String(e));
   }
+
+  // The claim is recorded (or best-effort attempted, per the incident
+  // trade-off above); the reservation has done its job.
+  await releaseReservation();
 
   return json({
     ok: true,
